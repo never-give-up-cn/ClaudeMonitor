@@ -2,7 +2,7 @@
 chcp 65001 >nul
 
 set MODE=%~1
-if "%MODE%"=="" set MODE=gui
+if "%MODE%"=="" set MODE=both
 
 cd /d "%~dp0"
 
@@ -33,12 +33,42 @@ if /i "%MODE%"=="console" (
     echo.
     %PY_CMD% monitor.py
     pause
-) else (
+    goto :eof
+)
+
+if /i "%MODE%"=="gui" (
     title Claude Monitor
     echo ========================================
     echo   Claude Code Monitor (Desktop)
     echo ========================================
     echo.
-    echo [INFO] Launching status window...
     start "" %PY_CMD% gui.py
+    goto :eof
 )
+
+:: ===== both mode (default) =====
+title Claude Monitor
+echo ========================================
+echo   Claude Code Monitor
+echo ========================================
+echo.
+
+:: start desktop window in background
+echo [INFO] Launching desktop window...
+start "" %PY_CMD% gui.py
+timeout /t 1 /nobreak >nul
+
+:: start console monitor in current window
+echo [INFO] Starting console monitor...
+echo.
+echo -------------------------------------------------
+echo  Both monitor and GUI are running.
+echo  Close this window to stop console monitor.
+echo  Close the GUI window separately.
+echo -------------------------------------------------
+echo.
+%PY_CMD% monitor.py
+
+echo.
+echo [INFO] Console monitor stopped.
+pause
