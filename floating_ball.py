@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-桌面悬浮球
-==========
-类似 360 桌面助手，圆形半透明浮窗显示系统状态：
-CPU、内存、GPU、磁盘、网速。
-点击打开 Claude Monitor 主窗口。
+桌面悬浮球 v2
+=============
+类似 360 桌面助手：
+- 圆形浮窗显示 CPU/内存/GPU/网速/磁盘
+- 拖拽到边缘自动吸附，自动隐藏为标签
+- 鼠标悬停滑出
+- 左键点击打开主 GUI
+- 右键菜单
 """
 
 import sys
 import os
-import threading
+import subprocess
 import time
+import threading
 from pathlib import Path
 from datetime import datetime
 
@@ -37,200 +41,175 @@ except ImportError:
 # ============================================================
 # 配置
 # ============================================================
-BALL_SIZE = 150       # 悬浮球尺寸
-UPDATE_INTERVAL = 1500  # 更新间隔(ms)
+BALL_SIZE = 140        # 展开尺寸
+TAB_SIZE = 16          # 吸附后标签宽度
+SNAP_DIST = 40         # 边缘吸附距离阈值
+UPDATE_MS = 1500       # 更新间隔
 FONT_DIGITAL = ("Consolas", 11, "bold")
 FONT_SMALL = ("Consolas", 8)
-FONT_CN = None
+FONT_TINY = ("Consolas", 7)
 
 # 检测中文字体
 try:
     tk.font.Font(family="微软雅黑", size=10).measure("测")
-    FONT_CN = ("微软雅黑", 9)
+    FONT_LABEL = ("微软雅黑", 9)
 except:
-    FONT_CN = ("TkDefaultFont", 9)
+    FONT_LABEL = ("TkDefaultFont", 9)
+
+
+def _load_color(pct):
+    """负载颜色: 绿→黄→红"""
+    if pct < 50:
+        return "#4ade80"
+    elif pct < 80:
+        return "#fbbf24"
+    return "#ef4444"
 
 
 class FloatingBall:
     """桌面悬浮球"""
 
     def __init__(self):
-        self.stats_collector = SystemStats()
+        self.stats = SystemStats()
+        self._running = True
+        self._drag_start = None  # (x, y) 拖拽起点
+        self._is_dragging = False
+        self._snapped = False     # 是否吸附在边缘
+        self._snap_edge = ""      # top/bottom/left/right
+        self._hidden_mode = False # 是否隐藏为标签
+        self._leave_timer = None  # 鼠标离开定时器
 
-        # 主窗口
+        # 窗口
         self.root = tk.Tk()
         self.root.title("系统监控")
-        self.root.overrideredirect(True)  # 无边框
+        self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
-        self.root.attributes("-transparentcolor", "#000000")  # 黑色透明
+        self.root.attributes("-transparentcolor", "#000000")
 
-        # 窗口位置（右下角）
-        sw = self.root.winfo_screenwidth()
-        sh = self.root.winfo_screenheight()
-        self.win_x = sw - BALL_SIZE - 20
-        self.win_y = sh - BALL_SIZE - 60
-        self.root.geometry(f"{BALL_SIZE}x{BALL_SIZE}+{self.win_x}+{self.win_y}")
+        # 屏幕尺寸
+        self.sw = self.root.winfo_screenwidth()
+        self.sh = self.root.winfo_screenheight()
+        self._default_x = self.sw - BALL_SIZE - 20
+        self._default_y = self.sh - BALL_SIZE - 60
 
-        # 数据
-        self.stats = {}
-        self._gui_process = None
-        self._running = True
-
-        # 构建 UI
-        self._build_ui()
-
-        # 拖拽
-        self._make_draggable()
-
-        # 启动更新
-        self.update_stats()
-
-        # 点击打开 GUI
-        self.canvas.bind("<Button-1>", self.on_click)
-        self.canvas.bind("<Button-3>", self.on_right_click)
-
-    def _build_ui(self):
-        """构建悬浮球界面"""
+        # Canvas
         self.canvas = tk.Canvas(
             self.root, width=BALL_SIZE, height=BALL_SIZE,
             bg="#000000", highlightthickness=0, cursor="hand2"
         )
         self.canvas.pack()
 
+        # 画静态元素
+        self._draw_ball()
+
+        # 事件
+        self.canvas.bind("<Button-1>", self._on_btn1)
+        self.canvas.bind("<B1-Motion>", self._on_drag)
+        self.canvas.bind("<ButtonRelease-1>", self._on_release)
+        self.canvas.bind("<Button-3>", self._on_right)
+        self.canvas.bind("<Enter>", self._on_enter)
+        self.canvas.bind("<Leave>", self._on_leave)
+
+        # 定位
+        self.root.geometry(f"+{self._default_x}+{self._default_y}")
+
+        # 定时更新
+        self.update_stats()
+
+    def _draw_ball(self, size=BALL_SIZE, snapped=False):
+        """绘制悬浮球"""
+        self.canvas.delete("all")
+        cx = cy = size // 2
+
+        if snapped:
+            # 吸附状态：只画一个小标签
+            r = size // 2 - 1
+            self.canvas.create_oval(
+                cx - r, cy - r, cx + r, cy + r,
+                fill="#1a1a2e", outline="#3a3a5e", width=1
+            )
+            self.canvas.create_text(
+                cx, cy, text="CC", fill="#888888",
+                font=("Consolas", 7, "bold"), anchor=tk.CENTER
+            )
+            return
+
         # 外圈辉光
-        r = BALL_SIZE // 2 - 2
-        cx = cy = BALL_SIZE // 2
+        r = size // 2 - 2
         self.canvas.create_oval(
             cx - r, cy - r, cx + r, cy + r,
             fill="#1a1a2e", outline="#3a3a5e", width=2
         )
-        # 内圈
-        r2 = r - 12
+        r2 = r - 10
         self.canvas.create_oval(
             cx - r2, cy - r2, cx + r2, cy + r2,
             fill="#16213e", outline="#2a3a5e", width=1
         )
 
         # 文本占位
-        self.cpu_text = self.canvas.create_text(
-            cx, cy - 20, text="CPU:--%", fill="#4ade80",
+        self.cpu_t = self.canvas.create_text(
+            cx, cy - 18, text="CPU:--%", fill="#4ade80",
             font=FONT_DIGITAL, anchor=tk.CENTER
         )
-        self.mem_text = self.canvas.create_text(
+        self.mem_t = self.canvas.create_text(
             cx, cy + 2, text="MEM:--%", fill="#60a5fa",
             font=FONT_SMALL, anchor=tk.CENTER
         )
-        self.gpu_text = self.canvas.create_text(
-            cx, cy + 18, text="GPU:--%", fill="#f472b6",
+        self.gpu_t = self.canvas.create_text(
+            cx, cy + 16, text="GPU:--%", fill="#f472b6",
             font=FONT_SMALL, anchor=tk.CENTER
         )
-
-        # 网速（左上角）
-        self.net_up_text = self.canvas.create_text(
-            8, 8, text="▲--K", fill="#fbbf24",
-            font=("Consolas", 7), anchor=tk.NW
-        )
-        self.net_down_text = self.canvas.create_text(
-            8, 20, text="▼--K", fill="#34d399",
-            font=("Consolas", 7), anchor=tk.NW
-        )
-
-        # 磁盘（右上角）
-        self.disk_text = self.canvas.create_text(
-            BALL_SIZE - 4, 8, text="C:--%", fill="#a78bfa",
-            font=("Consolas", 7), anchor=tk.NE
-        )
-
-    def _make_draggable(self):
-        """让悬浮球可拖动"""
-        self._drag_data = {"x": 0, "y": 0}
-
-        def start_drag(event):
-            self._drag_data["x"] = event.x_root
-            self._drag_data["y"] = event.y_root
-
-        def do_drag(event):
-            dx = event.x_root - self._drag_data["x"]
-            dy = event.y_root - self._drag_data["y"]
-            x = self.root.winfo_x() + dx
-            y = self.root.winfo_y() + dy
-            self.root.geometry(f"+{x}+{y}")
-            self._drag_data["x"] = event.x_root
-            self._drag_data["y"] = event.y_root
-
-        self.canvas.bind("<Button-1>", start_drag, add="+")
-        self.canvas.bind("<B1-Motion>", do_drag)
-
-    def update_stats(self):
-        """定时更新系统状态"""
-        if not self._running:
-            return
-
-        try:
-            self.stats = self.stats_collector.get_all()
-            self._render_stats()
-        except Exception:
-            pass
-
-        self.root.after(UPDATE_INTERVAL, self.update_stats)
-
-    def _render_stats(self):
-        """渲染数据到悬浮球"""
-        cx = cy = BALL_SIZE // 2
-        stats = self.stats
-
-        # CPU
-        cpu_percent = stats.get("cpu", {}).get("percent", 0)
-        cpu_color = self._load_color(cpu_percent)
-        self.canvas.itemconfig(self.cpu_text, text=f"CPU:{cpu_percent:.0f}%", fill=cpu_color)
-
-        # 内存
-        mem_percent = stats.get("memory", {}).get("percent", 0)
-        mem_color = self._load_color(mem_percent)
-        self.canvas.itemconfig(self.mem_text, text=f"MEM:{mem_percent:.0f}%", fill=mem_color)
-
-        # GPU
-        gpu = stats.get("gpu")
-        if gpu:
-            gpu_percent = gpu[0].get("util", 0) if isinstance(gpu, list) else 0
-            gpu_color = self._load_color(gpu_percent)
-            self.canvas.itemconfig(self.gpu_text, text=f"GPU:{gpu_percent:.0f}%", fill=gpu_color)
-        else:
-            self.canvas.itemconfig(self.gpu_text, text="GPU:--", fill="#555555")
-
         # 网速
-        net = stats.get("network", {})
-        up = net.get("up_kbps", 0)
-        down = net.get("down_kbps", 0)
-        up_str = f"▲{up:.0f}K" if up < 1000 else f"▲{up/1024:.1f}M"
-        down_str = f"▼{down:.0f}K" if down < 1000 else f"▼{down/1024:.1f}M"
-        self.canvas.itemconfig(self.net_up_text, text=up_str)
-        self.canvas.itemconfig(self.net_down_text, text=down_str)
+        self.net_up_t = self.canvas.create_text(
+            6, 6, text="▲--K", fill="#fbbf24",
+            font=FONT_TINY, anchor=tk.NW
+        )
+        self.net_dn_t = self.canvas.create_text(
+            6, 18, text="▼--K", fill="#34d399",
+            font=FONT_TINY, anchor=tk.NW
+        )
+        # 磁盘
+        self.disk_t = self.canvas.create_text(
+            size - 4, 6, text="C:--%", fill="#a78bfa",
+            font=FONT_TINY, anchor=tk.NE
+        )
 
-        # 磁盘（显示占用最高的盘）
-        disks = stats.get("disks", [])
-        disk_parts = []
-        for d in disks[:3]:
-            mount = d.get("mount", "")
-            if mount:
-                label = mount[0] if len(mount) == 1 else mount.replace(":\\", "")
-                disk_parts.append(f"{label}:{d.get('percent', 0):.0f}%")
-        disk_str = " ".join(disk_parts) if disk_parts else "--"
-        self.canvas.itemconfig(self.disk_text, text=disk_str)
+    # ---- 事件处理 ----
 
-    def _load_color(self, percent):
-        """根据负载返回颜色（绿→黄→红）"""
-        if percent < 50:
-            return "#4ade80"  # 绿
-        elif percent < 80:
-            return "#fbbf24"  # 黄
-        return "#ef4444"  # 红
+    def _on_btn1(self, event):
+        """鼠标按下：记录起点"""
+        self._drag_start = (event.x_root, event.y_root)
+        self._is_dragging = False
 
-    def on_click(self, event):
-        """左键点击 → 打开主 GUI"""
-        # 启动 gui.py
-        script_dir = Path(__file__).parent
-        gui_path = script_dir / "gui.py"
+    def _on_drag(self, event):
+        """拖拽中"""
+        if not self._drag_start:
+            return
+        dx = event.x_root - self._drag_start[0]
+        dy = event.y_root - self._drag_start[1]
+        if abs(dx) > 5 or abs(dy) > 5:
+            self._is_dragging = True
+        x = self.root.winfo_x() + dx
+        y = self.root.winfo_y() + dy
+        self.root.geometry(f"+{x}+{y}")
+        self._drag_start = (event.x_root, event.y_root)
+
+    def _on_release(self, event):
+        """鼠标释放：吸附检测 或 点击"""
+        if self._is_dragging:
+            # 拖拽结束 → 吸附检测
+            self._is_dragging = False
+            self._snap_check()
+        else:
+            # 没拖拽 → 当作点击
+            self._on_click()
+        self._drag_start = None
+
+    def _on_click(self):
+        """左键点击：打开主 GUI"""
+        if self._hidden_mode:
+            return
+        gui_path = Path(__file__).parent / "gui.py"
         if gui_path.exists():
             try:
                 subprocess.Popen(
@@ -240,38 +219,199 @@ class FloatingBall:
             except Exception:
                 pass
 
-    def on_right_click(self, event):
-        """右键点击 → 弹出菜单"""
+    def _on_right(self, event):
+        """右键：弹出菜单"""
         menu = tk.Menu(self.root, tearoff=0, bg="#2d2d2d", fg="#dddddd",
                        activebackground="#4a6a8a", activeforeground="#ffffff",
-                       font=("微软雅黑", 10) if FONT_CN else ("TkDefaultFont", 10))
-        menu.add_command(label="打开主窗口", command=self.open_gui)
-        menu.add_separator()
-        menu.add_command(label="重新加载", command=lambda: self.root.after(100, self.update_stats))
+                       font=FONT_LABEL if FONT_LABEL else ("TkDefaultFont", 10))
+        menu.add_command(label="打开主窗口", command=self._open_gui)
+        menu.add_command(label="重新加载", command=lambda: self.update_stats())
+        if self._snapped:
+            menu.add_command(label="解除吸附", command=self._unsnap)
         menu.add_separator()
         menu.add_command(label="退出", command=self.on_exit)
         menu.post(event.x_root, event.y_root)
 
-    def open_gui(self):
-        """打开主 GUI 窗口"""
-        self.on_click(None)
+    def _open_gui(self):
+        self._on_click()
+
+    # ---- 边缘吸附 ----
+
+    def _snap_check(self):
+        """检查是否需要吸附到边缘"""
+        x = self.root.winfo_x()
+        y = self.root.winfo_y()
+        cx = x + BALL_SIZE // 2
+        cy = y + BALL_SIZE // 2
+        w, h = BALL_SIZE, BALL_SIZE
+
+        # 找最近的边缘
+        dist_left = cx
+        dist_right = self.sw - cx
+        dist_top = cy
+        dist_bottom = self.sh - cy
+
+        min_dist = min(dist_left, dist_right, dist_top, dist_bottom)
+        if min_dist > SNAP_DIST:
+            if self._snapped:
+                self._unsnap()
+            return
+
+        self._snapped = True
+        if min_dist == dist_left:
+            self._snap_edge = "left"
+            self.root.geometry(f"{TAB_SIZE}x{h}+0+{y}")
+        elif min_dist == dist_right:
+            self._snap_edge = "right"
+            self.root.geometry(f"{TAB_SIZE}x{h}+{self.sw - TAB_SIZE}+{y}")
+        elif min_dist == dist_top:
+            self._snap_edge = "top"
+            self.root.geometry(f"{w}x{TAB_SIZE}+{x}+0")
+        else:
+            self._snap_edge = "bottom"
+            self.root.geometry(f"{w}x{TAB_SIZE}+{x}+{self.sh - TAB_SIZE}")
+
+        self._hidden_mode = True
+        self._draw_ball(TAB_SIZE, snapped=True)
+
+    def _unsnap(self):
+        """解除吸附"""
+        self._snapped = False
+        self._snap_edge = ""
+        self._hidden_mode = False
+        x = self.root.winfo_x()
+        y = self.root.winfo_y()
+        self.root.geometry(f"{BALL_SIZE}x{BALL_SIZE}+{x}+{y}")
+        self._draw_ball(BALL_SIZE)
+
+    def _on_enter(self, event):
+        """鼠标进入：滑出"""
+        if not self._snapped or not self._hidden_mode:
+            return
+        if self._leave_timer:
+            self.root.after_cancel(self._leave_timer)
+            self._leave_timer = None
+        self._slide_out()
+
+    def _on_leave(self, event):
+        """鼠标离开：延迟隐藏"""
+        if not self._snapped or not self._hidden_mode:
+            return
+        if self._leave_timer:
+            self.root.after_cancel(self._leave_timer)
+        self._leave_timer = self.root.after(1500, self._slide_in)
+
+    def _slide_out(self):
+        """滑出显示"""
+        if not self._snapped:
+            return
+        self._hidden_mode = False
+        x = self.root.winfo_x()
+        y = self.root.winfo_y()
+        edge = self._snap_edge
+
+        if edge == "left":
+            self.root.geometry(f"{BALL_SIZE}x{BALL_SIZE}+0+{y}")
+        elif edge == "right":
+            self.root.geometry(f"{BALL_SIZE}x{BALL_SIZE}+{self.sw - BALL_SIZE}+{y}")
+        elif edge == "top":
+            self.root.geometry(f"{BALL_SIZE}x{BALL_SIZE}+{x}+0")
+        elif edge == "bottom":
+            self.root.geometry(f"{BALL_SIZE}x{BALL_SIZE}+{x}+{self.sh - BALL_SIZE}")
+
+        self._draw_ball(BALL_SIZE)
+
+    def _slide_in(self):
+        """滑入隐藏为标签"""
+        if not self._snapped or self._hidden_mode:
+            return
+        # 检查鼠标是否还在窗口内
+        try:
+            wx, wy = self.root.winfo_pointerxy()
+            rx, ry = self.root.winfo_x(), self.root.winfo_y()
+            rw, rh = BALL_SIZE, BALL_SIZE
+            if rx <= wx <= rx + rw and ry <= wy <= ry + rh:
+                return  # 鼠标还在，不隐藏
+        except Exception:
+            pass
+
+        self._hidden_mode = True
+        x = self.root.winfo_x()
+        y = self.root.winfo_y()
+        edge = self._snap_edge
+
+        if edge == "left":
+            self.root.geometry(f"{TAB_SIZE}x{BALL_SIZE}+0+{y}")
+        elif edge == "right":
+            self.root.geometry(f"{TAB_SIZE}x{BALL_SIZE}+{self.sw - TAB_SIZE}+{y}")
+        elif edge == "top":
+            self.root.geometry(f"{BALL_SIZE}x{TAB_SIZE}+{x}+0")
+        elif edge == "bottom":
+            self.root.geometry(f"{BALL_SIZE}x{TAB_SIZE}+{x}+{self.sh - TAB_SIZE}")
+
+        self._draw_ball(TAB_SIZE, snapped=True)
+
+    # ---- 数据更新 ----
+
+    def update_stats(self):
+        """定时刷新数据"""
+        if not self._running:
+            return
+        try:
+            data = self.stats.get_all()
+            self._render(data)
+        except Exception:
+            pass
+        self.root.after(UPDATE_MS, self.update_stats)
+
+    def _render(self, data):
+        """渲染数据"""
+        if self._hidden_mode:
+            return  # 标签模式不显示数据
+
+        cpu = data.get("cpu", {}).get("percent", 0)
+        mem = data.get("memory", {}).get("percent", 0)
+        gpu_data = data.get("gpu")
+
+        self._set_text(self.cpu_t, f"CPU:{cpu:.0f}%", _load_color(cpu))
+        self._set_text(self.mem_t, f"MEM:{mem:.0f}%", _load_color(mem))
+
+        if gpu_data and isinstance(gpu_data, list) and len(gpu_data) > 0:
+            gp = gpu_data[0].get("util", 0)
+            self._set_text(self.gpu_t, f"GPU:{gp:.0f}%", _load_color(gp))
+        else:
+            self._set_text(self.gpu_t, "GPU:--", "#555555")
+
+        net = data.get("network", {})
+        up = net.get("up_kbps", 0)
+        dn = net.get("down_kbps", 0)
+        self._set_text(self.net_up_t, f"▲{up:.0f}K" if up < 999 else f"▲{up/1024:.1f}M", "#fbbf24")
+        self._set_text(self.net_dn_t, f"▼{dn:.0f}K" if dn < 999 else f"▼{dn/1024:.1f}M", "#34d399")
+
+        disks = data.get("disks", [])
+        parts = []
+        for d in disks[:2]:
+            label = d.get("mount", "")[0]
+            parts.append(f"{label}:{d.get('percent', 0):.0f}%")
+        self._set_text(self.disk_t, " ".join(parts) if parts else "--", "#a78bfa")
+
+    def _set_text(self, item, text, color):
+        """安全更新文本"""
+        try:
+            self.canvas.itemconfig(item, text=text, fill=color)
+        except Exception:
+            pass
 
     def on_exit(self):
         """退出"""
         self._running = False
         self.root.destroy()
 
-    def run(self):
-        """启动主循环"""
-        self.root.mainloop()
-
 
 def main():
-    print("启动桌面悬浮球...")
     ball = FloatingBall()
-    ball.run()
+    ball.root.mainloop()
 
 
 if __name__ == "__main__":
-    import subprocess
     main()
