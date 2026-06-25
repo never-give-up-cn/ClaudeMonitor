@@ -50,6 +50,12 @@ try:
 except ImportError:
     TOKEN_TRACKER_AVAILABLE = False
 
+try:
+    from conversation_logger import ConversationLogger
+    LOGGER_AVAILABLE = True
+except ImportError:
+    LOGGER_AVAILABLE = False
+
 # ============================================================
 # 配置
 # ============================================================
@@ -567,6 +573,16 @@ def main():
         except Exception as e:
             log.warning(f"Token 追踪初始化失败: {e}")
 
+    # 初始化对话日志
+    conversation_logger = None
+    if LOGGER_AVAILABLE:
+        try:
+            conversation_logger = ConversationLogger()
+            conversation_logger.poll()
+            log.info("对话日志已启用")
+        except Exception as e:
+            log.warning(f"对话日志初始化失败: {e}")
+
     # 首次运行快照
     log.info("开始监控 Claude Code 状态...")
     print()
@@ -576,6 +592,7 @@ def main():
     last_status = -1
     token_poll_counter = 0
     token_last_log = 0
+    log_poll_counter = 0
 
     try:
         while True:
@@ -618,6 +635,13 @@ def main():
                             log.info(f"[TOKEN] {stats['summary']}")
                             token_last_log = time.time()
 
+            # --- 对话日志 ---
+            if conversation_logger:
+                log_poll_counter += 1
+                if log_poll_counter >= 5:
+                    conversation_logger.poll()
+                    log_poll_counter = 0
+
             detail = " | ".join(detail_parts)
 
             # --- 更新 UI ---
@@ -649,11 +673,17 @@ def main():
             stats = token_tracker.get_stats()
             if stats["total"] > 0:
                 log.info(f"[TOKEN] 会话汇总: {stats['summary']}")
+        if conversation_logger:
+            summary = conversation_logger.get_summary()
+            if summary["turns"] > 0:
+                log.info(f"[LOG] 已记录 {summary['turns']} 轮对话, Token: {summary['input_tokens']:,}↑ {summary['output_tokens']:,}↓, 费用: ${summary['cost']:.4f}")
         log.info("监控已停止")
     finally:
         serial_mgr.close()
         if token_tracker:
             token_tracker.stop()
+        if conversation_logger:
+            conversation_logger.stop()
         print()
         log.info(f"运行结束: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 

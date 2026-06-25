@@ -41,6 +41,12 @@ try:
 except ImportError:
     TOKEN_TRACKER_AVAILABLE = False
 
+try:
+    from conversation_logger import ConversationLogger
+    LOGGER_AVAILABLE = True
+except ImportError:
+    LOGGER_AVAILABLE = False
+
 
 # ============================================================
 # 配置
@@ -387,6 +393,16 @@ class ClaudeMonitorGUI:
                 pass
         self._token_poll_counter = 0
 
+        # 对话日志
+        self.conversation_logger = None
+        if LOGGER_AVAILABLE:
+            try:
+                self.conversation_logger = ConversationLogger()
+                self.conversation_logger.poll()
+            except Exception:
+                pass
+        self._log_poll_counter = 0
+
         # 定时更新
         self.update_status()
 
@@ -493,6 +509,11 @@ class ClaudeMonitorGUI:
                                  relief=tk.FLAT, padx=14, pady=2, cursor="hand2")
         self.pin_btn.pack(side=tk.RIGHT, padx=(4, 0))
 
+        self.log_btn = tk.Button(btn_frame, text="查看日志", command=self.open_log_viewer,
+                                 font=FONT_SMALL, bg="#2a5a5a", fg="#cccccc",
+                                 relief=tk.FLAT, padx=14, pady=2, cursor="hand2")
+        self.log_btn.pack(side=tk.RIGHT, padx=(4, 0))
+
         self.quit_btn = tk.Button(btn_frame, text="退出", command=self.on_close,
                                   font=FONT_SMALL, bg="#5c1a1a", fg="#cccccc",
                                   relief=tk.FLAT, padx=14, pady=2, cursor="hand2")
@@ -557,6 +578,13 @@ class ClaudeMonitorGUI:
                 self.token_label.config(text="Token: 等待数据...")
                 self.token_cost_label.config(text="Claude 运行后自动统计")
 
+        # 更新对话日志（每 5 秒轮询一次）
+        if self.conversation_logger:
+            self._log_poll_counter += 1
+            if self._log_poll_counter >= 10:
+                self.conversation_logger.poll()
+                self._log_poll_counter = 0
+
         # 更新串口指示器
         if self.serial_connected:
             self.serial_indicator.itemconfig(self._serial_dot, fill="#4ade80")
@@ -580,11 +608,22 @@ class ClaudeMonitorGUI:
         # 继续更新
         self.root.after(int(CONFIG["check_interval"] * 1000), self.update_status)
 
+    def open_log_viewer(self):
+        """打开对话日志查看器"""
+        try:
+            from log_viewer import LogViewer
+            LogViewer(parent=self.root, logger=self.conversation_logger)
+        except Exception as e:
+            import tkinter.messagebox as mb
+            mb.showerror("错误", f"无法打开日志查看器:\n{e}")
+
     def on_close(self):
         self._running = False
         self.serial_mgr.close()
         if self.token_tracker:
             self.token_tracker.stop()
+        if self.conversation_logger:
+            self.conversation_logger.stop()
         self.root.destroy()
 
     def run(self):
