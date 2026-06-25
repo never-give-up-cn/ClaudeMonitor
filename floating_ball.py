@@ -623,8 +623,7 @@ class FloatingBall:
         sm.add_command(label="Token 面板", command=lambda: self._switch_style(2))
         m.add_cascade(label="切换样式", menu=sm)
 
-        # 解除吸附（动态启用/禁用）
-        self._unsnap_menu_idx = m.index(m.add_command(label="解除吸附", command=self._unsnap))
+        m.add_command(label="解除吸附", command=self._unsnap)
 
         m.add_separator()
         m.add_command(label="退出", command=self.on_exit)
@@ -651,10 +650,11 @@ class FloatingBall:
 
     def _on_right(self, event):
         """右键点击：弹出预构建菜单（不阻塞）"""
-        idx = self._menu.index("解除吸附")
-        if idx is not None:
-            self._menu.entryconfig(idx, label="解除吸附",
+        try:
+            self._menu.entryconfig("解除吸附",
                                     state=tk.NORMAL if self._snapped else tk.DISABLED)
+        except Exception:
+            pass
         self._menu.post(event.x_root, event.y_root)
 
     def _open_settings(self):
