@@ -489,7 +489,7 @@ class ClaudeMonitorGUI:
 
         # 串口状态在标题栏右侧
         self.title_serial = tk.Label(title_bar, text="● 串口", font=("Consolas", 9),
-                                     fg="#777E8C", bg="#18191C", padx=(0, 12))
+                                     fg="#777E8C", bg="#18191C")
         self.title_serial.pack(side=tk.RIGHT)
 
         self._make_draggable(title_bar)
