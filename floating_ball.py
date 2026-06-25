@@ -562,8 +562,7 @@ class FloatingBall:
         y2s2 = y2s + 24
         self._t("gpu", self.canvas.create_text(L, y2s2, text="GPU:--", fill=c_hw, font=f_sm, anchor=tk.W))
         self._t("netu", self.canvas.create_text(L+W2, y2s2, text="▲--K", fill=c_up, font=f_sm, anchor=tk.W))
-        # Row: download arrow
-        self._t("netd", self.canvas.create_text(L, y2s2+18, text="▼--K", fill=c_dn, font=f_sm, anchor=tk.W))
+        self._t("netd", self.canvas.create_text(L+W2+40, y2s2, text="▼--K", fill=c_dn, font=f_sm, anchor=tk.W))
         # Progress bar for GPU
         self._t("gpub", self.canvas.create_rectangle(L, y2s2+14, L, y2s2+16, fill=c_hw, outline=""))
         self._items["gpub_pos"] = (L, y2s2+14)
