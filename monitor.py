@@ -650,16 +650,24 @@ def main():
             # --- 发送到 Arduino ---
             if status_code != last_status:
                 serial_mgr.send(status_code)
+                old_status = last_status
                 last_status = status_code
                 # 状态变更提示音
                 try:
                     from sound_manager import play, SOUND_DONE, SOUND_ACTION, SOUND_ERROR
-                    if status_code == DONE:
-                        play(SOUND_DONE)
+                except Exception:
+                    pass
+                try:
+                    ACTIVE = {LOADING, THINKING, READING, WRITING, BUILDING, COMMAND}
+                    DONE_SET = {PROCESSING, WAITING, DONE}
+                    if status_code == ERROR:
+                        play(SOUND_ERROR)
                     elif status_code == WAITING:
                         play(SOUND_ACTION)
-                    elif status_code == ERROR:
-                        play(SOUND_ERROR)
+                    elif old_status in ACTIVE and status_code in DONE_SET:
+                        play(SOUND_DONE)
+                    elif status_code == DONE:
+                        play(SOUND_DONE)
                 except Exception:
                     pass
 

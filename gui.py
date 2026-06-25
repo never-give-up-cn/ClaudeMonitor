@@ -597,27 +597,41 @@ class ClaudeMonitorGUI:
 
         # 状态变更时播放提示音
         if code != old_code:
-            if code == DONE:
+            # 活跃状态：THINKING, READING, WRITING, BUILDING, COMMAND, LOADING
+            ACTIVE = {THINKING, READING, WRITING, BUILDING, COMMAND, LOADING}
+            # 完成状态：PROCESSING, WAITING, IDLE, DONE
+            DONE_SET = {PROCESSING, WAITING, DONE}
+
+            try:
+                from sound_manager import play, SOUND_DONE, SOUND_ACTION, SOUND_ERROR
+            except Exception:
+                pass
+
+            if code == ERROR:
                 try:
-                    from sound_manager import play, SOUND_DONE
-                    play(SOUND_DONE)
-                except Exception:
-                    pass
-                self._log_action("任务完成")
-            elif code == WAITING:
-                try:
-                    from sound_manager import play, SOUND_ACTION
-                    play(SOUND_ACTION)
-                except Exception:
-                    pass
-                self._log_action("等待用户操作")
-            elif code == ERROR:
-                try:
-                    from sound_manager import play, SOUND_ERROR
                     play(SOUND_ERROR)
                 except Exception:
                     pass
                 self._log_action("错误状态")
+            elif code == WAITING:
+                try:
+                    play(SOUND_ACTION)
+                except Exception:
+                    pass
+                self._log_action("等待用户操作")
+            elif old_code in ACTIVE and code in DONE_SET:
+                # 从活跃状态→完成状态：Claude 刚回答完
+                try:
+                    play(SOUND_DONE)
+                except Exception:
+                    pass
+                self._log_action("任务完成")
+            elif code == DONE:
+                try:
+                    play(SOUND_DONE)
+                except Exception:
+                    pass
+                self._log_action("进程退出")
 
         en, cn, icon = STATUS[code]
         bg_color, fg_color = STATUS_COLORS[code]
