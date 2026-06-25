@@ -92,7 +92,8 @@ class SystemStats:
             tmp.write(ps_script); tmp.close()
             r = subprocess.run(
                 ["powershell", "-NoProfile", "-File", tmp.name],
-                capture_output=True, text=True, timeout=8)
+                capture_output=True, text=True, timeout=8,
+                creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0)
             os.unlink(tmp.name)
             out = r.stdout.strip()
             if out and ("UTIL:" in out or "NAME:" in out or "MEM:" in out):
