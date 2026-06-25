@@ -389,42 +389,37 @@ class ClaudeMonitorGUI:
 
         self.root = tk.Tk()
         self.root.title("Claude Code 状态监控")
-        self.root.overrideredirect(False)
+        self.root.overrideredirect(True)  # 自定义标题栏
         self.root.resizable(False, False)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+        self.root.configure(bg="#18191C")
 
         # 上次日志轮数（用于检测新完成的任务）
         self._last_log_turns = 0
-        self._last_done_sound = 0   # 上次播放完成音的秒数（防抖）
-        self._start_time = time.time()  # 启动时间（用于启动静默期）
+        self._last_done_sound = 0
+        self._start_time = time.time()
+        self._ring_angle = 0
 
         # 窗口尺寸
-        self.win_w, self.win_h = 480, 440
+        self.win_w, self.win_h = 520, 420
         self.root.minsize(self.win_w, self.win_h)
 
-        # 居中显示
         sw = self.root.winfo_screenwidth()
         sh = self.root.winfo_screenheight()
         x = (sw - self.win_w) // 2
         y = (sh - self.win_h) // 2
         self.root.geometry(f"{self.win_w}x{self.win_h}+{x}+{y}")
 
-        self._make_draggable()
-
         # 初始化组件
         self.detector = StateDetector()
         self.serial_mgr = SerialManager(CONFIG)
         self._build_ui()
 
-        # 串口连接
         self.serial_connected = self.serial_mgr.connect()
         self.serial_retry = 0
-
-        # 状态追踪
         self._last_serial_code = -1
         self._running = True
 
-        # Token 追踪
         self.token_tracker = None
         if CONFIG.get("enable_token_tracking", True) and TOKEN_TRACKER_AVAILABLE:
             try:
@@ -434,7 +429,6 @@ class ClaudeMonitorGUI:
                 pass
         self._token_poll_counter = 0
 
-        # 对话日志
         self.conversation_logger = None
         if LOGGER_AVAILABLE:
             try:
@@ -444,111 +438,222 @@ class ClaudeMonitorGUI:
                 pass
         self._log_poll_counter = 0
 
-        # 定时更新
         self.update_status()
 
-    def _make_draggable(self):
-        """让窗口可拖动"""
-        self._drag_data = {"x": 0, "y": 0}
+    # ========== Custom Title Bar ==========
 
+    def _make_draggable(self, widget=None):
+        """让指定控件可拖动窗口"""
+        if widget is None:
+            widget = self.root
+        data = {"x": 0, "y": 0}
         def start_drag(event):
-            self._drag_data["x"] = event.x
-            self._drag_data["y"] = event.y
-
+            data["x"] = event.x_root
+            data["y"] = event.y_root
         def do_drag(event):
-            dx = event.x - self._drag_data["x"]
-            dy = event.y - self._drag_data["y"]
+            dx = event.x_root - data["x"]
+            dy = event.y_root - data["y"]
             x = self.root.winfo_x() + dx
             y = self.root.winfo_y() + dy
             self.root.geometry(f"+{x}+{y}")
+            data["x"] = event.x_root
+            data["y"] = event.y_root
+        widget.bind("<Button-1>", start_drag, add="+")
+        widget.bind("<B1-Motion>", do_drag, add="+")
 
-        self.root.bind("<Button-1>", start_drag)
-        self.root.bind("<B1-Motion>", do_drag)
+    def _title_btn(self, parent, text, cmd, hover_bg="#3B414E"):
+        """统一标题栏按钮"""
+        btn = tk.Label(parent, text=text, font=("Consolas", 12), fg="#A0A8B8",
+                       bg="#18191C", padx=8, pady=2, cursor="hand2")
+        btn.pack(side=tk.RIGHT, padx=(0, 0))
+        btn.bind("<Button-1>", lambda e: cmd())
+        btn.bind("<Enter>", lambda e: btn.configure(fg="#56E3F5"))
+        btn.bind("<Leave>", lambda e: btn.configure(fg="#A0A8B8"))
+        return btn
 
     def _build_ui(self):
-        """构建界面"""
-        self.root.configure(bg="#1e1e1e")
+        """构建全新界面"""
+        root = self.root
 
-        # 主容器
-        main = tk.Frame(self.root, bg="#1e1e1e", padx=24, pady=16)
+        # ===== 1. Custom Title Bar =====
+        title_bar = tk.Frame(root, bg="#18191C", height=34)
+        title_bar.pack(fill=tk.X)
+        title_bar.pack_propagate(False)
+
+        self._title_close = self._title_btn(title_bar, "×", self.on_close, "#5C3A3A")
+        self._title_max = self._title_btn(title_bar, "—", self._toggle_minimize, "#3B414E")
+        self._title_min = self._title_btn(title_bar, "─", self._minimize_to_tray, "#3B414E")
+
+        tk.Label(title_bar, text="Claude Code 监控", font=("Consolas", 12, "bold"),
+                 fg="#F0F4FB", bg="#18191C", padx=14).pack(side=tk.LEFT)
+
+        # 串口状态在标题栏右侧
+        self.title_serial = tk.Label(title_bar, text="● 串口", font=("Consolas", 9),
+                                     fg="#777E8C", bg="#18191C", padx=(0, 12))
+        self.title_serial.pack(side=tk.RIGHT)
+
+        self._make_draggable(title_bar)
+
+        # ===== 2. Main Container =====
+        main = tk.Frame(root, bg="#18191C", padx=16, pady=8)
         main.pack(fill=tk.BOTH, expand=True)
 
-        # 标题栏
-        title_frame = tk.Frame(main, bg="#1e1e1e")
-        title_frame.pack(fill=tk.X, pady=(0, 8))
+        # ===== 3. Status Bar =====
+        status_bg = "#282C34"
+        status_frame = tk.Frame(main, bg=status_bg, padx=14, pady=10)
+        status_frame.pack(fill=tk.X)
 
-        tk.Label(title_frame, text="Claude Code 状态监控",
-                 font=FONT_TITLE, fg="#ffffff", bg="#1e1e1e").pack(side=tk.LEFT)
+        # Left: animated ring canvas
+        self.ring_canvas = tk.Canvas(status_frame, width=40, height=40,
+                                      bg=status_bg, highlightthickness=0)
+        self.ring_canvas.pack(side=tk.LEFT, padx=(0, 12))
+        self._ring_arc = self.ring_canvas.create_arc(4, 4, 36, 36, start=0, extent=270,
+                                                       outline="#56E3F5", width=3, style="arc")
 
-        self.serial_indicator = tk.Canvas(title_frame, width=12, height=12,
-                                           bg="#1e1e1e", highlightthickness=0)
-        self.serial_indicator.pack(side=tk.RIGHT, padx=(5, 0))
-        self._serial_dot = self.serial_indicator.create_oval(1, 1, 11, 11,
-                                                              fill="#555555", outline="")
+        # Middle: status text
+        status_text_frame = tk.Frame(status_frame, bg=status_bg)
+        status_text_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        tk.Label(title_frame, text="串口",
-                 font=FONT_SMALL, fg="#888888", bg="#1e1e1e").pack(side=tk.RIGHT)
+        self.status_label = tk.Label(status_text_frame, text="空闲 IDLE",
+                                     font=("Consolas", 18, "bold"), fg="#56E3F5",
+                                     bg=status_bg, anchor=tk.W)
+        self.status_label.pack(anchor=tk.W)
 
-        # 分割线
-        sep = tk.Frame(main, height=1, bg="#333333")
-        sep.pack(fill=tk.X, pady=(0, 12))
+        self.status_sub = tk.Label(status_text_frame, text="状态码: 0 · Claude 未运行",
+                                   font=("Consolas", 9), fg="#777E8C",
+                                   bg=status_bg, anchor=tk.W)
+        self.status_sub.pack(anchor=tk.W, pady=(2, 0))
 
-        # 状态主显示区 (垂直居中)
-        status_area = tk.Frame(main, bg="#1e1e1e")
-        status_area.pack(expand=True, fill=tk.BOTH)
+        # Right: CPU
+        cpu_frame = tk.Frame(status_frame, bg="#1E2128", padx=12, pady=6, relief="flat")
+        cpu_frame.pack(side=tk.RIGHT)
+        self.cpu_label = tk.Label(cpu_frame, text="CPU 0.0%", font=("Consolas", 13, "bold"),
+                                  fg="#56E3F5", bg="#1E2128")
+        self.cpu_label.pack()
+        self.proc_label = tk.Label(cpu_frame, text="进程: --", font=("Consolas", 8),
+                                   fg="#777E8C", bg="#1E2128")
+        self.proc_label.pack()
 
-        self.status_icon_label = tk.Label(status_area, text="●",
-                                          font=FONT_ICON, bg="#1e1e1e")
-        self.status_icon_label.pack(pady=(12, 2))
+        # ===== 4. Hardware Card =====
+        hw_card = tk.Frame(main, bg="#282C34", padx=14, pady=10)
+        hw_card.pack(fill=tk.X, pady=(10, 0))
 
-        self.status_cn_label = tk.Label(status_area, text="空闲",
-                                        font=FONT_STATUS, bg="#1e1e1e")
-        self.status_cn_label.pack()
+        # Card header
+        hw_header = tk.Frame(hw_card, bg="#282C34")
+        hw_header.pack(fill=tk.X)
+        tk.Label(hw_header, text="硬件负载", font=("Consolas", 10, "bold"),
+                 fg="#A0A8B8", bg="#282C34").pack(side=tk.LEFT)
+        self.mem_label = tk.Label(hw_header, text="MEM --%", font=("Consolas", 10),
+                                  fg="#A0A8B8", bg="#282C34")
+        self.mem_label.pack(side=tk.RIGHT)
 
-        self.status_en_label = tk.Label(status_area, text="IDLE",
-                                        font=FONT_EN, bg="#1e1e1e")
-        self.status_en_label.pack(pady=(4, 6))
+        # CPU bar row
+        hw_cpu = tk.Frame(hw_card, bg="#282C34")
+        hw_cpu.pack(fill=tk.X, pady=(8, 0))
+        tk.Label(hw_cpu, text="CPU", font=("Consolas", 10), fg="#A0A8B8",
+                 bg="#282C34", width=4, anchor=tk.W).pack(side=tk.LEFT)
+        self.cpu_bar_canvas = tk.Canvas(hw_cpu, height=6, bg="#1E2128",
+                                         highlightthickness=0)
+        self.cpu_bar_canvas.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(8, 0))
+        self.cpu_bar = self.cpu_bar_canvas.create_rectangle(0, 0, 0, 6, fill="#56E3F5", width=0)
+        self.cpu_bar_width = 0
 
-        self.status_code_label = tk.Label(status_area, text="状态码: 0",
-                                          font=FONT_EN_SM, bg="#1e1e1e", fg="#888888")
-        self.status_code_label.pack()
+        # GPU bar row
+        hw_gpu = tk.Frame(hw_card, bg="#282C34")
+        hw_gpu.pack(fill=tk.X, pady=(4, 0))
+        tk.Label(hw_gpu, text="GPU", font=("Consolas", 10), fg="#A0A8B8",
+                 bg="#282C34", width=4, anchor=tk.W).pack(side=tk.LEFT)
+        self.gpu_bar_canvas = tk.Canvas(hw_gpu, height=6, bg="#1E2128",
+                                         highlightthickness=0)
+        self.gpu_bar_canvas.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(8, 0))
+        self.gpu_bar = self.gpu_bar_canvas.create_rectangle(0, 0, 0, 6, fill="#FFC864", width=0)
+        self.gpu_bar_width = 0
 
-        # 详情栏
-        detail_frame = tk.Frame(main, bg="#252525", padx=14, pady=10)
-        detail_frame.pack(fill=tk.X, pady=(10, 0))
+        # Memory bar row
+        hw_mem = tk.Frame(hw_card, bg="#282C34")
+        hw_mem.pack(fill=tk.X, pady=(4, 0))
+        tk.Label(hw_mem, text="MEM", font=("Consolas", 10), fg="#A0A8B8",
+                 bg="#282C34", width=4, anchor=tk.W).pack(side=tk.LEFT)
+        self.mem_bar_canvas = tk.Canvas(hw_mem, height=6, bg="#1E2128",
+                                         highlightthickness=0)
+        self.mem_bar_canvas.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(8, 0))
+        self.mem_bar = self.mem_bar_canvas.create_rectangle(0, 0, 0, 6, fill="#4CD079", width=0)
+        self.mem_bar_width = 0
 
-        self.cpu_label = tk.Label(detail_frame, text="CPU: --",
-                                  font=FONT_EN, bg="#252525", fg="#aaaaaa")
-        self.cpu_label.pack(anchor=tk.W)
+        # ===== 5. Token & Model Card =====
+        token_card = tk.Frame(main, bg="#1A2428", padx=14, pady=10)
+        token_card.pack(fill=tk.X, pady=(10, 0))
 
-        self.proc_label = tk.Label(detail_frame, text="进程: --",
-                                   font=FONT_EN_SM, bg="#252525", fg="#777777")
-        self.proc_label.pack(anchor=tk.W, pady=(2, 0))
+        # Two-column layout
+        token_cols = tk.Frame(token_card, bg="#1A2428")
+        token_cols.pack(fill=tk.X)
 
-        # Token 统计栏
-        token_frame = tk.Frame(main, bg="#1a2a1a", padx=14, pady=8)
-        token_frame.pack(fill=tk.X, pady=(6, 0))
+        # Left: Traffic
+        left_col = tk.Frame(token_cols, bg="#1A2428")
+        left_col.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        self.token_label = tk.Label(token_frame, text="Token: 等待数据...",
-                                    font=FONT_EN_SM, bg="#1a2a1a", fg="#88cc88")
-        self.token_label.pack(anchor=tk.W)
+        tk.Label(left_col, text="流量统计", font=("Consolas", 10, "bold"),
+                 fg="#56E3F5", bg="#1A2428").pack(anchor=tk.W)
 
-        self.token_cost_label = tk.Label(token_frame, text="",
-                                         font=FONT_EN_SM, bg="#1a2a1a", fg="#66aa66")
-        self.token_cost_label.pack(anchor=tk.W, pady=(1, 0))
+        flow_row = tk.Frame(left_col, bg="#1A2428")
+        flow_row.pack(fill=tk.X, pady=(6, 0))
+        self.tok_in = tk.Label(flow_row, text="IN: --", font=("Consolas", 13, "bold"),
+                               fg="#56E3F5", bg="#1A2428")
+        self.tok_in.pack(side=tk.LEFT, padx=(0, 16))
+        self.tok_out = tk.Label(flow_row, text="OUT: --", font=("Consolas", 13, "bold"),
+                                fg="#56E3F5", bg="#1A2428")
+        self.tok_out.pack(side=tk.LEFT)
 
-        # 底部按钮
-        btn_frame = tk.Frame(main, bg="#1e1e1e")
-        btn_frame.pack(fill=tk.X, pady=(10, 0))
+        self.tok_total = tk.Label(left_col, text="总量: --", font=("Consolas", 10),
+                                  fg="#777E8C", bg="#1A2428")
+        self.tok_total.pack(anchor=tk.W, pady=(2, 0))
 
-        self.status_bar = tk.Label(btn_frame, text="就绪",
-                                   font=FONT_SMALL, fg="#666666", bg="#1e1e1e")
-        self.status_bar.pack(side=tk.LEFT)
+        # Right: Params
+        right_col = tk.Frame(token_cols, bg="#1A2428")
+        right_col.pack(side=tk.RIGHT, fill=tk.X, expand=True)
 
-        # 右侧按钮组（从右到左排列）
-        self.quit_btn = tk.Button(btn_frame, text="退出", command=self.on_close,
-                                  font=FONT_SMALL, bg="#5c1a1a", fg="#cccccc",
-                                  relief=tk.FLAT, padx=14, pady=2, cursor="hand2")
+        tk.Label(right_col, text="运行参数", font=("Consolas", 10, "bold"),
+                 fg="#A0A8B8", bg="#1A2428").pack(anchor=tk.W)
+
+        self.tok_model = tk.Label(right_col, text="模型: --", font=("Consolas", 10),
+                                  fg="#A0A8B8", bg="#1A2428")
+        self.tok_model.pack(anchor=tk.W, pady=(2, 0))
+        self.tok_cost = tk.Label(right_col, text="费用: --", font=("Consolas", 11, "bold"),
+                                 fg="#FFC864", bg="#1A2428")
+        self.tok_cost.pack(anchor=tk.W, pady=(2, 0))
+        self.tok_msgs = tk.Label(right_col, text="消息: --", font=("Consolas", 10),
+                                 fg="#777E8C", bg="#1A2428")
+        self.tok_msgs.pack(anchor=tk.W, pady=(2, 0))
+
+        # ===== 6. Bottom Button Bar =====
+        btn_frame = tk.Frame(main, bg="#18191C")
+        btn_frame.pack(fill=tk.X, pady=(12, 0))
+
+        # Left: serial status tag
+        self.serial_tag = tk.Label(btn_frame, text="● 串口 未连接",
+                                   font=("Consolas", 9), fg="#F55C5C", bg="#18191C")
+        self.serial_tag.pack(side=tk.LEFT)
+
+        # Right buttons (uniform style)
+        def mk_btn(text, cmd, color="#2C313A"):
+            btn = tk.Button(btn_frame, text=text, command=cmd,
+                           font=("Consolas", 10), bg=color, fg="#A0A8B8",
+                           relief="flat", padx=14, pady=4, cursor="hand2",
+                           activebackground="#3B414E", activeforeground="#56E3F5")
+            btn.pack(side=tk.RIGHT, padx=(4, 0))
+            btn.bind("<Enter>", lambda e: btn.configure(bg="#3B414E", fg="#56E3F5"))
+            btn.bind("<Leave>", lambda e: btn.configure(bg=color, fg="#A0A8B8"))
+            return btn
+
+        mk_btn("退出", self.on_close, "#2C313A")
+        mk_btn("托盘", self.toggle_tray)
+        mk_btn("趋势图", self.open_chart)
+        mk_btn("Web日志", self.open_web_viewer)
+        self.sound_btn = mk_btn("音效:开", self.toggle_sound)
+        mk_btn("查看日志", self.open_log_viewer)
+        mk_btn("置顶", self.toggle_pin)
+
+        self._is_pinned = False
         self.quit_btn.pack(side=tk.RIGHT, padx=(4, 0))
 
         self.tray_btn = tk.Button(btn_frame, text="托盘", command=self.toggle_tray,
@@ -584,136 +689,147 @@ class ClaudeMonitorGUI:
 
         self._is_pinned = False
 
-    def toggle_pin(self):
         self._is_pinned = not self._is_pinned
         self.root.attributes("-topmost", self._is_pinned)
-        self.pin_btn.config(text="取消置顶" if self._is_pinned else "置顶",
-                            bg="#3a5c3a" if self._is_pinned else "#333333")
+
+    def _toggle_minimize(self):
+        self.root.iconify()
+
+    def _minimize_to_tray(self):
+        self.toggle_tray()
+
+    def _update_ring(self, color="#56E3F5", spinning=False):
+        try:
+            self._ring_angle = (self._ring_angle + 30) % 360
+            if spinning:
+                self.ring_canvas.itemconfig(self._ring_arc, outline=color,
+                                             start=self._ring_angle, extent=270)
+            else:
+                self.ring_canvas.itemconfig(self._ring_arc, outline=color, start=0, extent=359)
+        except Exception:
+            pass
+
+    def _update_progress_bar(self, canvas, bar_item, pct, color="#56E3F5"):
+        try:
+            w = canvas.winfo_width() - 4
+            fw = max(2, int(w * min(pct, 100) / 100))
+            canvas.coords(bar_item, 2, 1, 2 + fw, 5)
+            canvas.itemconfig(bar_item, fill=color)
+        except Exception:
+            pass
 
     def update_status(self):
-        """定时更新状态显示"""
         if not self._running:
             return
-
-        # 检测状态
         old_code = self.detector.last_status
         code = self.detector.detect()
         self.detector.last_status = code
-
-        # 状态变更提示音（带防抖）
         now = time.time()
         try:
             from sound_manager import play, SOUND_DONE, SOUND_ACTION, SOUND_ERROR
         except Exception:
             pass
-
         should_play_done = False
-
         if code != old_code:
             ACTIVE = {THINKING, READING, WRITING, BUILDING, COMMAND, LOADING}
             DONE_SET = {PROCESSING, WAITING, DONE}
-
             if code == ERROR:
-                play(SOUND_ERROR)
-                self._log_action("错误状态")
+                play(SOUND_ERROR); self._log_action("错误状态")
             elif code == WAITING:
-                play(SOUND_ACTION)
-                self._log_action("等待用户操作")
+                play(SOUND_ACTION); self._log_action("等待用户操作")
             elif old_code in ACTIVE and code in DONE_SET:
                 should_play_done = True
             elif code == DONE:
                 should_play_done = True
-
-        # 对话日志检测新完成（比 CPU 检测更灵敏，但要防抖）
         if self.conversation_logger:
             try:
-                summary = self.conversation_logger.get_summary()
-                turns = summary.get("turns", 0)
-                if turns > self._last_log_turns:
+                s = self.conversation_logger.get_summary()
+                t = s.get("turns", 0)
+                if t > self._last_log_turns:
                     if self._last_log_turns > 0:
                         should_play_done = True
-                    self._last_log_turns = turns
+                    self._last_log_turns = t
             except Exception:
                 pass
-
-        # 统一播放完成音（防抖 + 启动静默期）
         if should_play_done and now - self._start_time > 15 and now - self._last_done_sound > 8:
             self._last_done_sound = now
-            try:
-                play(SOUND_DONE)
-            except Exception:
-                pass
+            try: play(SOUND_DONE)
+            except: pass
 
         en, cn, icon = STATUS[code]
-        bg_color, fg_color = STATUS_COLORS[code]
+        _, fg_color = STATUS_COLORS[code]
+        self.status_label.config(text=f"{cn} {en}", fg=fg_color)
+        hints = {IDLE:"Claude 未运行",LOADING:"进程初始化中",THINKING:"模型推理中",
+                 READING:"读取文件中",WRITING:"写入代码",SEARCHING:"搜索代码库",
+                 BUILDING:"编译中",COMMAND:"执行命令",WAITING:"等待用户操作",
+                 PROCESSING:"处理中",DONE:"任务刚完成",ERROR:"异常状态"}
+        self.status_sub.config(text=f"状态码: {code} · {hints.get(code, '')}")
+        is_active = code in {THINKING,READING,WRITING,BUILDING,COMMAND,LOADING,PROCESSING}
+        self._update_ring(fg_color, spinning=is_active)
 
-        # 更新主显示
-        display_icon = "●"
-        self.status_icon_label.config(text=display_icon, fg=fg_color)
-        self.status_cn_label.config(text=cn, fg=fg_color)
-        self.status_en_label.config(text=en, fg=fg_color)
-        self.status_code_label.config(text=f"状态码: {code}", fg=fg_color)
-
-        # 窗口背景微调
-        self.root.configure(bg=bg_color)
-
-        # 更新详情
         cpu = self.detector.last_cpu
         pid = self.detector.last_pid
         pname = self.detector.last_proc_name
-
         if self.detector.get_current_processes():
-            self.cpu_label.config(text=f"CPU: {cpu:.1f}%")
-            self.proc_label.config(text=f"进程: {pname} (PID: {pid})")
+            cc = "#FF4444" if cpu > 80 else "#56E3F5"
+            self.cpu_label.config(text=f"CPU {cpu:.1f}%", fg=cc)
+            self.proc_label.config(text=f"{pname} ({pid})")
+            self._update_progress_bar(self.cpu_bar_canvas, self.cpu_bar, cpu, cc)
         else:
-            self.cpu_label.config(text="CPU: --")
+            self.cpu_label.config(text="CPU --", fg="#777E8C")
             self.proc_label.config(text="进程: --")
+        try:
+            mem = psutil.virtual_memory().percent
+            mc = "#FF4444" if mem > 80 else "#4CD079"
+            self.mem_label.config(text=f"MEM {mem:.0f}%", fg=mc)
+            self._update_progress_bar(self.mem_bar_canvas, self.mem_bar, mem, mc)
+        except Exception:
+            pass
 
-        # 更新 Token 统计
         if self.token_tracker:
             self._token_poll_counter += 1
-            if self._token_poll_counter >= 4:  # ~2秒刷新一次
+            if self._token_poll_counter >= 4:
                 self.token_tracker.poll()
                 self._token_poll_counter = 0
-
-            tstats = self.token_tracker.get_stats()
-            if tstats["total"] > 0:
-                short = self.token_tracker.get_short_summary()
-                self.token_label.config(text=short)
-                cost_str = f"模型:{tstats['model'][:20]}  消息:{tstats['messages']}  耗时:{tstats['elapsed_hours']:.1f}h"
-                self.token_cost_label.config(text=cost_str)
+            t = self.token_tracker.get_stats()
+            if t["total"] > 0:
+                inp = f"{t['input']//1000}K" if t['input'] >= 1000 else str(t['input'])
+                out = f"{t['output']//1000}K" if t['output'] >= 1000 else str(t['output'])
+                total = f"{t['total']//1000}K" if t['total'] >= 1000 else str(t['total'])
+                self.tok_in.config(text=f"IN: {inp}")
+                self.tok_out.config(text=f"OUT: {out}")
+                self.tok_total.config(text=f"总量: {total}")
+                self.tok_model.config(text=f"模型: {t['model'][:28]}")
+                self.tok_cost.config(text=f"费用: ${t['cost']:.4f}")
+                self.tok_msgs.config(text=f"消息: {t['messages']}  |  耗时: {t['elapsed_hours']:.1f}h")
             else:
-                self.token_label.config(text="Token: 等待数据...")
-                self.token_cost_label.config(text="Claude 运行后自动统计")
+                self.tok_in.config(text="IN: --")
+                self.tok_out.config(text="OUT: --")
+                self.tok_total.config(text="总量: --")
 
-        # 更新对话日志（每 5 秒轮询一次）
+        port_str = self.serial_mgr.port or ""
+        if self.serial_connected:
+            self.title_serial.config(text=f"● {port_str}", fg="#4CD079")
+            self.serial_tag.config(text=f"● 串口 {port_str}", fg="#4CD079")
+        else:
+            self.title_serial.config(text="● 串口 断开", fg="#F55C5C")
+            self.serial_tag.config(text="● 串口 未连接", fg="#F55C5C")
+
+        if code != self._last_serial_code and self.serial_connected:
+            self.serial_mgr.send(code)
+            self._last_serial_code = code
+        if not self.serial_connected:
+            self.serial_retry += 1
+            if self.serial_retry >= 60:
+                self.serial_connected = self.serial_mgr.try_reconnect()
+                self.serial_retry = 0
+
         if self.conversation_logger:
             self._log_poll_counter += 1
             if self._log_poll_counter >= 10:
                 self.conversation_logger.poll()
                 self._log_poll_counter = 0
 
-        # 更新串口指示器
-        if self.serial_connected:
-            self.serial_indicator.itemconfig(self._serial_dot, fill="#4ade80")
-            self.status_bar.config(text=f"串口: {self.serial_mgr.port or '已连接'}", fg="#4ade80")
-        else:
-            self.serial_indicator.itemconfig(self._serial_dot, fill="#ff6b6b")
-            self.status_bar.config(text="串口: 未连接", fg="#ff6b6b")
-
-        # 发送到 Arduino
-        if code != self._last_serial_code and self.serial_connected:
-            self.serial_mgr.send(code)
-            self._last_serial_code = code
-
-        # 串口重连
-        if not self.serial_connected:
-            self.serial_retry += 1
-            if self.serial_retry >= 60:  # 每 30 秒重试
-                self.serial_connected = self.serial_mgr.try_reconnect()
-                self.serial_retry = 0
-
-        # 继续更新
         self.root.after(int(CONFIG["check_interval"] * 1000), self.update_status)
 
     def open_log_viewer(self):
