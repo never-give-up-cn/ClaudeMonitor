@@ -35,6 +35,12 @@ except ImportError:
     print("错误: 需要 pyserial。请运行: pip install pyserial")
     sys.exit(1)
 
+try:
+    from token_tracker import TokenTracker
+    TOKEN_TRACKER_AVAILABLE = True
+except ImportError:
+    TOKEN_TRACKER_AVAILABLE = False
+
 
 # ============================================================
 # 配置
@@ -49,6 +55,7 @@ CONFIG = {
     "done_display_time": 3,
     "cpu_think_threshold": 8.0,
     "cpu_low_threshold": 1.0,
+    "enable_token_tracking": True,
 }
 
 # ============================================================
@@ -345,7 +352,7 @@ class ClaudeMonitorGUI:
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
         # 窗口尺寸
-        self.win_w, self.win_h = 480, 380
+        self.win_w, self.win_h = 480, 440
         self.root.minsize(self.win_w, self.win_h)
 
         # 居中显示
@@ -369,6 +376,16 @@ class ClaudeMonitorGUI:
         # 状态追踪
         self._last_serial_code = -1
         self._running = True
+
+        # Token 追踪
+        self.token_tracker = None
+        if CONFIG.get("enable_token_tracking", True) and TOKEN_TRACKER_AVAILABLE:
+            try:
+                self.token_tracker = TokenTracker()
+                self.token_tracker.poll()
+            except Exception:
+                pass
+        self._token_poll_counter = 0
 
         # 定时更新
         self.update_status()
@@ -451,6 +468,18 @@ class ClaudeMonitorGUI:
                                    font=FONT_EN_SM, bg="#252525", fg="#777777")
         self.proc_label.pack(anchor=tk.W, pady=(2, 0))
 
+        # Token 统计栏
+        token_frame = tk.Frame(main, bg="#1a2a1a", padx=14, pady=8)
+        token_frame.pack(fill=tk.X, pady=(6, 0))
+
+        self.token_label = tk.Label(token_frame, text="Token: 等待数据...",
+                                    font=FONT_EN_SM, bg="#1a2a1a", fg="#88cc88")
+        self.token_label.pack(anchor=tk.W)
+
+        self.token_cost_label = tk.Label(token_frame, text="",
+                                         font=FONT_EN_SM, bg="#1a2a1a", fg="#66aa66")
+        self.token_cost_label.pack(anchor=tk.W, pady=(1, 0))
+
         # 底部按钮
         btn_frame = tk.Frame(main, bg="#1e1e1e")
         btn_frame.pack(fill=tk.X, pady=(10, 0))
@@ -511,6 +540,23 @@ class ClaudeMonitorGUI:
             self.cpu_label.config(text="CPU: --")
             self.proc_label.config(text="进程: --")
 
+        # 更新 Token 统计
+        if self.token_tracker:
+            self._token_poll_counter += 1
+            if self._token_poll_counter >= 4:  # ~2秒刷新一次
+                self.token_tracker.poll()
+                self._token_poll_counter = 0
+
+            tstats = self.token_tracker.get_stats()
+            if tstats["total"] > 0:
+                short = self.token_tracker.get_short_summary()
+                self.token_label.config(text=short)
+                cost_str = f"模型:{tstats['model'][:20]}  消息:{tstats['messages']}  耗时:{tstats['elapsed_hours']:.1f}h"
+                self.token_cost_label.config(text=cost_str)
+            else:
+                self.token_label.config(text="Token: 等待数据...")
+                self.token_cost_label.config(text="Claude 运行后自动统计")
+
         # 更新串口指示器
         if self.serial_connected:
             self.serial_indicator.itemconfig(self._serial_dot, fill="#4ade80")
@@ -537,6 +583,8 @@ class ClaudeMonitorGUI:
     def on_close(self):
         self._running = False
         self.serial_mgr.close()
+        if self.token_tracker:
+            self.token_tracker.stop()
         self.root.destroy()
 
     def run(self):

@@ -44,6 +44,12 @@ except ImportError:
     print("错误: 需要 pyserial 库。请运行: pip install pyserial")
     sys.exit(1)
 
+try:
+    from token_tracker import TokenTracker
+    TOKEN_TRACKER_AVAILABLE = True
+except ImportError:
+    TOKEN_TRACKER_AVAILABLE = False
+
 # ============================================================
 # 配置
 # ============================================================
@@ -60,6 +66,8 @@ CONFIG = {
     "log_file": "monitor.log",       # 日志文件
     "cpu_think_threshold": 8.0,      # THINKING 状态的 CPU 阈值(%)
     "cpu_low_threshold": 1.0,        # 低 CPU 阈值
+    "enable_token_tracking": True,   # 启用 Token 监控
+    "token_poll_interval": 2,        # Token 轮询间隔（检测次数）
 }
 
 # ============================================================
@@ -547,6 +555,18 @@ def main():
     # 初始化状态检测器
     detector = StateDetector(CONFIG, file_monitor)
 
+    # 初始化 Token 追踪器
+    token_tracker = None
+    token_available = False
+    if CONFIG.get("enable_token_tracking", True) and TOKEN_TRACKER_AVAILABLE:
+        try:
+            token_tracker = TokenTracker()
+            token_tracker.poll()
+            token_available = True
+            log.info("Token 追踪已启用")
+        except Exception as e:
+            log.warning(f"Token 追踪初始化失败: {e}")
+
     # 首次运行快照
     log.info("开始监控 Claude Code 状态...")
     print()
@@ -554,6 +574,8 @@ def main():
     # 主循环
     retry_serial_counter = 0
     last_status = -1
+    token_poll_counter = 0
+    token_last_log = 0
 
     try:
         while True:
@@ -582,6 +604,20 @@ def main():
                 child_names = list(set(c.name() for c in children if c.name()))
                 detail_parts.append(f"子进程: {','.join(child_names[:3])}")
 
+            # --- Token 统计 ---
+            if token_tracker:
+                token_poll_counter += 1
+                if token_poll_counter >= CONFIG.get("token_poll_interval", 2):
+                    token_tracker.poll()
+                    token_poll_counter = 0
+                    stats = token_tracker.get_stats()
+                    if stats["total"] > 0:
+                        detail_parts.append(f"Token: IN:{stats['input']//1000}K OUT:{stats['output']//1000}K")
+                        # 每 60 秒打印一次详细 Token 日志
+                        if time.time() - token_last_log > 60:
+                            log.info(f"[TOKEN] {stats['summary']}")
+                            token_last_log = time.time()
+
             detail = " | ".join(detail_parts)
 
             # --- 更新 UI ---
@@ -609,9 +645,15 @@ def main():
 
     except KeyboardInterrupt:
         print()
+        if token_tracker:
+            stats = token_tracker.get_stats()
+            if stats["total"] > 0:
+                log.info(f"[TOKEN] 会话汇总: {stats['summary']}")
         log.info("监控已停止")
     finally:
         serial_mgr.close()
+        if token_tracker:
+            token_tracker.stop()
         print()
         log.info(f"运行结束: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
