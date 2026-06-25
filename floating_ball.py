@@ -661,8 +661,15 @@ class FloatingBall:
         gui_path = SCRIPT_DIR / "gui.py"
         if gui_path.exists():
             try:
-                subprocess.Popen([sys.executable, str(gui_path)],
-                                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
+                # Use proper Python (not pyw.exe which needs -3 flag)
+                py_exe = sys.executable
+                bn = os.path.basename(py_exe).lower()
+                if bn in ('pyw.exe', 'pythonw.exe'):
+                    py_exe = py_exe.replace('pyw.exe', 'python.exe').replace('pythonw.exe', 'python.exe')
+                if not os.path.exists(py_exe):
+                    py_exe = 'python'
+                subprocess.Popen([py_exe, str(gui_path)],
+                                 creationflags=subprocess.CREATE_NO_WINDOW if 'pythonw' not in py_exe and sys.platform == 'win32' else 0)
             except Exception:
                 pass
 
