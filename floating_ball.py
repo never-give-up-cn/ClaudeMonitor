@@ -418,6 +418,12 @@ class FloatingBall:
 
         self._draw_ball()
         self._bind_events()
+        self._menu = self._build_menu()  # 预构建右键菜单
+        # 后台线程刷新数据，不阻塞 UI
+        self._latest_data = {}
+        self._latest_tok = {}
+        self._stats_thread_running = True
+        self._stats_thread()
         self.root.geometry(f"+{self.sw-self.bs-20}+{self.sh-self.bs-60}")
         self.update_stats()
 
@@ -599,26 +605,57 @@ class FloatingBall:
             if self._hidden_mode:
                 self._slide_out()
 
+    def _build_menu(self):
+        """预构建右键菜单（只创建一次）"""
+        m = tk.Menu(self.root, tearoff=0, bg="#2d2d2d", fg="#dddddd",
+                    activebackground="#4a6a8a", activeforeground="#ffffff",
+                    font=("微软雅黑", 10))
+
+        m.add_command(label="打开主窗口", command=self._on_click)
+        m.add_command(label="设置", command=self._open_settings)
+
+        m.add_separator()
+
+        # 样式子菜单
+        sm = tk.Menu(m, tearoff=0, bg="#2d2d2d", fg="#dddddd",
+                      activebackground="#4a6a8a", activeforeground="#ffffff")
+        sm.add_command(label="简约圆形", command=lambda: self._switch_style(1))
+        sm.add_command(label="Token 面板", command=lambda: self._switch_style(2))
+        m.add_cascade(label="切换样式", menu=sm)
+
+        # 解除吸附（动态启用/禁用）
+        self._unsnap_menu_idx = m.index(m.add_command(label="解除吸附", command=self._unsnap))
+
+        m.add_separator()
+        m.add_command(label="退出", command=self.on_exit)
+        return m
+
+    def _stats_thread(self):
+        """后台线程采集数据，不阻塞主线程"""
+        import threading
+        def _worker():
+            while self._stats_thread_running:
+                try:
+                    data = self.stats.get_all()
+                    tok = {}
+                    if self.token_tracker:
+                        self.token_tracker.poll()
+                        tok = self.token_tracker.get_stats()
+                    self._latest_data = data
+                    self._latest_tok = tok
+                except Exception:
+                    pass
+                time.sleep(2)
+        t = threading.Thread(target=_worker, daemon=True)
+        t.start()
+
     def _on_right(self, event):
-        menu = tk.Menu(self.root, tearoff=0, bg="#2d2d2d", fg="#dddddd",
-                       activebackground="#4a6a8a", activeforeground="#ffffff",
-                       font=("微软雅黑", 10))
-        menu.add_command(label="打开主窗口", command=self._on_click)
-        menu.add_command(label="设置", command=self._open_settings)
-        if self._snapped:
-            menu.add_command(label="解除吸附", command=self._unsnap)
-        menu.add_separator()
-        cur = self.settings.get("style", 1)
-        style_menu = tk.Menu(menu, tearoff=0, bg="#2d2d2d", fg="#dddddd",
-                              activebackground="#4a6a8a", activeforeground="#ffffff")
-        style_menu.add_command(label="● 简约圆形" if cur == 1 else "  简约圆形",
-                                command=lambda: self._switch_style(1))
-        style_menu.add_command(label="● Token面板" if cur == 2 else "  Token面板",
-                                command=lambda: self._switch_style(2))
-        menu.add_cascade(label="切换样式", menu=style_menu)
-        menu.add_separator()
-        menu.add_command(label="退出", command=self.on_exit)
-        menu.post(event.x_root, event.y_root)
+        """右键点击：弹出预构建菜单（不阻塞）"""
+        idx = self._menu.index("解除吸附")
+        if idx is not None:
+            self._menu.entryconfig(idx, label="解除吸附",
+                                    state=tk.NORMAL if self._snapped else tk.DISABLED)
+        self._menu.post(event.x_root, event.y_root)
 
     def _open_settings(self):
         SettingsDialog(self.root, callback=self._on_settings_changed)
@@ -732,27 +769,21 @@ class FloatingBall:
     # ---- 数据 ----
 
     def update_stats(self):
+        """UI 更新（只读取缓存，不阻塞）"""
         if not self._running:
             return
         try:
-            data = self.stats.get_all()
-            if self.token_tracker:
-                self.token_tracker.poll()
-                tok = self.token_tracker.get_stats()
-            else:
-                tok = {}
-            self._render(data, tok)
+            data = self._latest_data
+            tok = self._latest_tok
+            if not self._hidden_mode:
+                if data:
+                    if self.settings.get("style", 1) == 1:
+                        self._render_style1(data)
+                    else:
+                        self._render_style2(data, tok)
         except Exception:
             pass
         self.root.after(UPDATE_MS, self.update_stats)
-
-    def _render(self, data, tok):
-        if self._hidden_mode:
-            return
-        if self.settings.get("style", 1) == 1:
-            self._render_style1(data)
-        else:
-            self._render_style2(data, tok)
 
     def _render_style1(self, data):
         cpu = data.get("cpu", {}).get("percent", 0)
@@ -822,6 +853,7 @@ class FloatingBall:
 
     def on_exit(self):
         self._running = False
+        self._stats_thread_running = False
         if self._inst:
             self._inst.stop()
         self.root.destroy()
