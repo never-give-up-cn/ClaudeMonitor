@@ -8,14 +8,15 @@ cd /d "%~dp0"
 
 :: ===== Find Python 3 =====
 set PY_CMD=
+set PY_CMD_W=
 
-:: 1) Windows Python Launcher
+:: 1) py launcher (Windows embeddable)
 py -3 --version >nul 2>&1
 if errorlevel 1 goto :try_python3
 py -3 -c "import sys; sys.exit(0 if sys.version_info >= (3,7) else 1)" >nul 2>&1
 if errorlevel 1 goto :try_python3
 set PY_CMD=py -3
-set PY_CMD_W=py -3w
+set PY_CMD_W=pyw -3
 goto :found_py
 
 :try_python3
@@ -25,7 +26,7 @@ if errorlevel 1 goto :try_python
 python3 -c "import sys; sys.exit(0 if sys.version_info >= (3,7) else 1)" >nul 2>&1
 if errorlevel 1 goto :try_python
 set PY_CMD=python3
-set PY_CMD_W=pythonw
+where pythonw >nul 2>&1 && set PY_CMD_W=pythonw || set PY_CMD_W=python3
 goto :found_py
 
 :try_python
@@ -35,7 +36,7 @@ if errorlevel 1 goto :no_py
 python -c "import sys; sys.exit(0 if sys.version_info >= (3,7) else 1)" >nul 2>&1
 if errorlevel 1 goto :no_py
 set PY_CMD=python
-set PY_CMD_W=pythonw
+where pythonw >nul 2>&1 && set PY_CMD_W=pythonw || set PY_CMD_W=python
 goto :found_py
 
 :no_py
