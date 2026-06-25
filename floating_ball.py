@@ -437,7 +437,7 @@ class FloatingBall:
         self.update_stats()
 
     def _ball_size(self):
-        return 210 if self.settings.get("style", 1) == 2 else SIZE_1
+        return 224 if self.settings.get("style", 1) == 2 else SIZE_1
 
     def _get_font(self, key, default=9):
         return ("Consolas", self.settings.get(key, default), "bold")
