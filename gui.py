@@ -395,6 +395,7 @@ class ClaudeMonitorGUI:
 
         # 上次日志轮数（用于检测新完成的任务）
         self._last_log_turns = 0
+        self._last_done_sound = 0  # 上次播放完成音的秒数（防抖）
 
         # 窗口尺寸
         self.win_w, self.win_h = 480, 440
@@ -598,58 +599,46 @@ class ClaudeMonitorGUI:
         code = self.detector.detect()
         self.detector.last_status = code
 
-        # 状态变更时播放提示音
+        # 状态变更提示音（带防抖）
+        now = time.time()
+        try:
+            from sound_manager import play, SOUND_DONE, SOUND_ACTION, SOUND_ERROR
+        except Exception:
+            pass
+
+        should_play_done = False
+
         if code != old_code:
-            # 活跃状态：THINKING, READING, WRITING, BUILDING, COMMAND, LOADING
             ACTIVE = {THINKING, READING, WRITING, BUILDING, COMMAND, LOADING}
-            # 完成状态：PROCESSING, WAITING, IDLE, DONE
             DONE_SET = {PROCESSING, WAITING, DONE}
 
-            try:
-                from sound_manager import play, SOUND_DONE, SOUND_ACTION, SOUND_ERROR
-            except Exception:
-                pass
-
             if code == ERROR:
-                try:
-                    play(SOUND_ERROR)
-                except Exception:
-                    pass
+                play(SOUND_ERROR)
                 self._log_action("错误状态")
             elif code == WAITING:
-                try:
-                    play(SOUND_ACTION)
-                except Exception:
-                    pass
+                play(SOUND_ACTION)
                 self._log_action("等待用户操作")
             elif old_code in ACTIVE and code in DONE_SET:
-                # 从活跃状态→完成状态：Claude 刚回答完
-                try:
-                    play(SOUND_DONE)
-                except Exception:
-                    pass
-                self._log_action("任务完成")
+                should_play_done = True
             elif code == DONE:
-                try:
-                    play(SOUND_DONE)
-                except Exception:
-                    pass
-                self._log_action("进程退出")
+                should_play_done = True
 
-        # 对话日志检测：新轮次完成 → 提示音（比 CPU 检测更可靠）
+        # 对话日志检测新完成（比 CPU 检测更灵敏，但要防抖）
         if self.conversation_logger:
             try:
                 summary = self.conversation_logger.get_summary()
                 turns = summary.get("turns", 0)
-                if turns > self._last_log_turns:
+                if turns > self._last_log_turns and self._last_log_turns > 0:
                     self._last_log_turns = turns
-                    # 只在非首次检测且有实际内容时响
-                    if self._last_log_turns > 0:
-                        try:
-                            from sound_manager import play, SOUND_DONE
-                            play(SOUND_DONE)
-                        except Exception:
-                            pass
+                    should_play_done = True
+            except Exception:
+                pass
+
+        # 统一播放完成音（防抖：同轮对话只响一次）
+        if should_play_done and now - self._last_done_sound > 8:
+            self._last_done_sound = now
+            try:
+                play(SOUND_DONE)
             except Exception:
                 pass
 
