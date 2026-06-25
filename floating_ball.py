@@ -537,13 +537,16 @@ class FloatingBall:
         f_tiny = ("Consolas", 8)
 
         # ---- Module 1: Traffic & Cost ----
+        # Row 1: IN / OUT
         self._t("toki", self.canvas.create_text(L, y1+16, text="IN:--", fill=c_val, font=f_big, anchor=tk.W))
         self._t("toko", self.canvas.create_text(L+W2, y1+16, text="OUT:--", fill=c_val, font=f_big, anchor=tk.W))
-        self._t("tokc", self.canvas.create_text(L, y1+37, text="COST:--", fill=c_cost, font=f_med, anchor=tk.W))
-        self._t("tokt", self.canvas.create_text(L+W2, y1+37, text="Total:--", fill=c_val, font=f_sm, anchor=tk.W))
+        # Row 2: COST alone
+        self._t("tokc", self.canvas.create_text(L, y1+36, text="COST:--", fill=c_cost, font=f_med, anchor=tk.W))
+        # Row 3: Total alone
+        self._t("tokt", self.canvas.create_text(L, y1+54, text="Total:--", fill=c_val, font=f_sm, anchor=tk.W))
 
         # Divider 1
-        d1y = y1 + 55
+        d1y = y1 + 70
         self.canvas.create_line(L, d1y, x2-12, d1y, fill=c_div, width=1)
 
         # ---- Module 2: Hardware ----
@@ -556,16 +559,17 @@ class FloatingBall:
         self._items["cpub_pos"] = (L, y2s+14)
         self._items["memb_pos"] = (L+W2, y2s+14)
 
-        y2s2 = y2s + 22
+        y2s2 = y2s + 24
         self._t("gpu", self.canvas.create_text(L, y2s2, text="GPU:--", fill=c_hw, font=f_sm, anchor=tk.W))
         self._t("netu", self.canvas.create_text(L+W2, y2s2, text="▲--K", fill=c_up, font=f_sm, anchor=tk.W))
-        self._t("netd", self.canvas.create_text(L, y2s2+16, text="▼--K", fill=c_dn, font=f_sm, anchor=tk.W))
+        # Row: download arrow
+        self._t("netd", self.canvas.create_text(L, y2s2+18, text="▼--K", fill=c_dn, font=f_sm, anchor=tk.W))
         # Progress bar for GPU
         self._t("gpub", self.canvas.create_rectangle(L, y2s2+14, L, y2s2+16, fill=c_hw, outline=""))
         self._items["gpub_pos"] = (L, y2s2+14)
 
         # Divider 2
-        d2y = y2s2 + 32
+        d2y = y2s2 + 36
         self.canvas.create_line(L, d2y, x2-12, d2y, fill=c_div, width=1)
 
         # ---- Module 3: Disk ----
@@ -577,7 +581,7 @@ class FloatingBall:
         self._items["diskb_pos"] = (L, y3s+26)
 
         # Divider 3
-        d3y = y3s + 34
+        d3y = y3s + 36
         self.canvas.create_line(L, d3y, x2-12, d3y, fill=c_div, width=1)
 
         # ---- Module 4: Footer ----
