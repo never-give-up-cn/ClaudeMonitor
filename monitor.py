@@ -54,12 +54,12 @@ CONFIG = {
     "watch_dirs": [                  # 监控的目录（检测文件变化）
         str(Path.home() / "Desktop"),
     ],
-    "idle_timeout": 30,              # 无 CPU 活动多少秒后标记为等待
+    "idle_timeout": 15,              # 无 CPU 活动多少秒后标记为等待
     "startup_timeout": 15,           # 进程刚启动多少秒内标记为加载
     "done_display_time": 3,          # 进程退出后显示"完成"的秒数
     "log_file": "monitor.log",       # 日志文件
-    "cpu_think_threshold": 15.0,     # THINKING 状态的 CPU 阈值(%)
-    "cpu_low_threshold": 2.0,        # 低 CPU 阈值
+    "cpu_think_threshold": 8.0,      # THINKING 状态的 CPU 阈值(%)
+    "cpu_low_threshold": 1.0,        # 低 CPU 阈值
 }
 
 # ============================================================
@@ -251,80 +251,67 @@ class FileChangeMonitor:
         self._snapshot = {}  # path -> last_write_time
         self._changed = False
         self._lock = threading.Lock()
-        self._exclude_patterns = [
-            r"\.git\\",
-            r"node_modules\\",
-            r"__pycache__\\",
-            r"\\.next\\",
-            r"\\.claude\\",
-            r"\\.idea\\",
-            r"\\.vscode\\",
-            r"\.log$",
-            r"\.pyc$",
-        ]
+        self._exclude_dirs = {
+            ".git", "node_modules", "__pycache__",
+            ".next", ".claude", ".idea", ".vscode",
+            "dist", "build", ".cache", "target",
+        }
+        self._max_depth = 4  # 最大递归深度
 
     def _should_ignore(self, path):
-        for pat in self._exclude_patterns:
-            if re.search(pat, path, re.IGNORECASE):
-                return True
-        return False
+        parts = path.replace("\\", "/").split("/")
+        return any(ex in parts for ex in self._exclude_dirs)
+
+    def _scandir_recursive(self, root, depth=0):
+        """使用 scandir 高效遍历目录, 限制深度"""
+        if depth > self._max_depth or self._should_ignore(root):
+            return
+        try:
+            with os.scandir(root) as it:
+                for entry in it:
+                    full = entry.path
+                    if entry.is_dir(follow_symlinks=False):
+                        yield from self._scandir_recursive(full, depth + 1)
+                    elif entry.is_file(follow_symlinks=False):
+                        if entry.name.endswith((".log", ".pyc", ".tmp")):
+                            continue
+                        try:
+                            yield full, entry.stat().st_mtime
+                        except OSError:
+                            pass
+        except PermissionError:
+            pass
 
     def snapshot(self):
         """快照当前文件状态"""
         self._snapshot.clear()
         for d in self.watch_dirs:
-            if not os.path.isdir(d):
-                continue
-            try:
-                for root, dirs, files in os.walk(d, topdown=True):
-                    # 跳过排除目录
-                    dirs[:] = [d for d in dirs if not self._should_ignore(os.path.join(root, d))]
-                    for f in files:
-                        fp = os.path.join(root, f)
-                        if self._should_ignore(fp):
-                            continue
-                        try:
-                            self._snapshot[fp] = os.path.getmtime(fp)
-                        except OSError:
-                            pass
-            except Exception:
-                pass
+            if os.path.isdir(d):
+                for fp, mtime in self._scandir_recursive(d):
+                    self._snapshot[fp] = mtime
         with self._lock:
             self._changed = False
         log.info(f"文件快照已建立: {len(self._snapshot)} 个文件")
 
     def check_changes(self):
-        """检查文件变化，返回是否有修改"""
+        """检查文件变化（高效增量扫描）"""
         changed = False
         new_snapshot = {}
 
         for d in self.watch_dirs:
             if not os.path.isdir(d):
                 continue
-            try:
-                for root, dirs, files in os.walk(d, topdown=True):
-                    dirs[:] = [d for d in dirs if not self._should_ignore(os.path.join(root, d))]
-                    for f in files:
-                        fp = os.path.join(root, f)
-                        if self._should_ignore(fp):
-                            continue
-                        try:
-                            mtime = os.path.getmtime(fp)
-                            new_snapshot[fp] = mtime
-                            prev = self._snapshot.get(fp)
-                            if prev is not None and abs(mtime - prev) > 0.1:
-                                changed = True
-                            elif prev is None:
-                                changed = True  # 新文件
-                        except OSError:
-                            pass
-            except Exception:
-                pass
+            for fp, mtime in self._scandir_recursive(d):
+                new_snapshot[fp] = mtime
+                prev = self._snapshot.get(fp)
+                if prev is None or abs(mtime - prev) > 0.1:
+                    changed = True
 
         # 检查删除的文件
-        for fp in list(self._snapshot.keys()):
+        for fp in self._snapshot:
             if fp not in new_snapshot:
                 changed = True
+                break
 
         self._snapshot = new_snapshot
         with self._lock:
@@ -344,28 +331,35 @@ class StateDetector:
     def __init__(self, config, file_monitor):
         self.config = config
         self.file_monitor = file_monitor
-        self._prev_cpu_times = {}      # pid -> (user, system) 上一帧
-        self._prev_cpu_total = None     # 系统总 CPU 时间
-        self._idle_since = None         # 空闲开始时间
-        self._was_running = False       # 上一帧 Claude 是否运行
-        self._done_counter = 0          # 完成状态显示计数
-        self._prev_status = -1
+        self._cpu_prev = {}            # pid -> (user, system, timestamp)
+        self._idle_since = None        # 空闲开始时间
+        self._was_running = False      # 上一帧 Claude 是否运行
+        self._done_counter = 0         # 完成状态显示计数
         self._processes = []
-        self._prev_file_snapshot = None
+        self._file_check_counter = 0   # 文件检测计数器（每 N 次检测一次）
+        self.last_cpu = 0.0            # 最近一次 CPU 检测值供外部使用
 
-    def get_cpu_percent(self, procs):
-        """获取 Claude 进程的 CPU 使用率（1秒均值）"""
-        if not procs:
+    def _calc_cpu(self, pid):
+        """通过 cpu_times 差值计算进程 CPU 使用率，避免 cpu_percent 对新对象的 0 值问题"""
+        try:
+            now = time.time()
+            p = psutil.Process(pid)
+            ct = p.cpu_times()
+            key = (ct.user, ct.system)
+
+            if pid in self._cpu_prev:
+                prev_user, prev_sys, prev_time = self._cpu_prev[pid]
+                dt = now - prev_time
+                if dt > 0:
+                    cpu = ((ct.user - prev_user) + (ct.system - prev_sys)) / dt * 100.0
+                    self._cpu_prev[pid] = (ct.user, ct.system, now)
+                    return min(cpu, 100.0)
+
+            self._cpu_prev[pid] = (ct.user, ct.system, now)
             return 0.0
-
-        total = 0.0
-        for p in procs:
-            try:
-                proc = psutil.Process(p.info["pid"])
-                total += proc.cpu_percent(interval=0)
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                pass
-        return total
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            self._cpu_prev.pop(pid, None)
+            return 0.0
 
     def detect(self):
         """执行一次状态检测，返回状态码"""
@@ -383,7 +377,6 @@ class StateDetector:
         self._idle_since = None
 
         if self._was_running:
-            # Claude 刚退出，显示 DONE
             self._was_running = False
             self._done_counter = self.config["done_display_time"]
             return DONE
@@ -398,20 +391,28 @@ class StateDetector:
         self._was_running = True
         self._done_counter = 0
 
-        # 获取主进程
         main_proc = procs[0]
-        try:
-            proc = psutil.Process(main_proc.info["pid"])
-            uptime = time.time() - proc.create_time()
-            cpu_percent = proc.cpu_percent(interval=0)
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            return PROCESSING
+        pid = main_proc.info["pid"]
 
-        # 获取所有子进程
+        try:
+            p = psutil.Process(pid)
+            uptime = time.time() - p.create_time()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            return ERROR
+
+        # 真实 CPU 使用率（通过 cpu_times 差值计算）
+        cpu_percent = self._calc_cpu(pid)
+        self.last_cpu = cpu_percent
+
+        # 子进程
         children = get_claude_subprocesses(procs)
 
-        # 检查文件变化
-        file_changed = self.file_monitor.has_changes
+        # 文件变化检测（每 3 秒一次，减少 IO 开销）
+        self._file_check_counter += 1
+        file_changed = False
+        if self._file_check_counter >= 3:
+            file_changed = self.file_monitor.check_changes()
+            self._file_check_counter = 0
 
         # --- 状态判断逻辑 ---
 
@@ -419,52 +420,42 @@ class StateDetector:
         if uptime < self.config["startup_timeout"]:
             return LOADING
 
-        # 2. 有子进程在运行
+        # 2. 子进程运行中
         if children:
-            child_names = [c.name().lower() if c.name() else "" for c in children]
-            child_str = " ".join(child_names)
-
-            # 编译/构建工具
-            if any(t in child_str for t in ["npm", "node", "webpack", "tsc", "babel",
-                                              "vite", "rollup", "esbuild", "ng", "vue"]):
+            child_str = " ".join((c.name() or "").lower() for c in children)
+            if any(t in child_str for t in
+                   ["npm", "node", "webpack", "tsc", "babel",
+                    "vite", "rollup", "esbuild", "ng", "vue"]):
                 return BUILDING
-            # 版本控制
             elif any(t in child_str for t in ["git", "svn", "hg"]):
                 return COMMAND
             else:
                 return COMMAND
 
-        # 3. 文件写入活动（写代码）
+        # 3. 文件写入
         if file_changed:
             return WRITING
 
-        # 4. CPU 高占用（思考/推理）
+        # 4. CPU 高 → 思考
         if cpu_percent > self.config["cpu_think_threshold"]:
             self._idle_since = None
-            # 区分 THINKING 和 READING
-            # 简单的启发式：看是否有大量 IO 活动
             try:
-                io_counters = proc.io_counters()
-                # 如果读字节远大于写字节，可能是 READING
-                if io_counters.read_bytes > io_counters.write_bytes * 10:
+                io = p.io_counters()
+                if io.read_bytes > io.write_bytes * 10:
                     return READING
             except (psutil.AccessDenied, AttributeError):
                 pass
             return THINKING
 
-        # 5. 低 CPU 但进程存活
+        # 5. 低 CPU
         if cpu_percent < self.config["cpu_low_threshold"]:
             if self._idle_since is None:
                 self._idle_since = time.time()
-
-            idle_seconds = time.time() - self._idle_since
-            if idle_seconds > self.config["idle_timeout"]:
-                return WAITING
-            else:
-                return PROCESSING  # 低 CPU，短暂空闲中
+            idle_sec = time.time() - self._idle_since
+            return WAITING if idle_sec > self.config["idle_timeout"] else PROCESSING
         else:
             self._idle_since = None
-            return PROCESSING  # 中等 CPU，一般处理
+            return PROCESSING
 
     def get_current_processes(self):
         return self._processes
@@ -572,10 +563,11 @@ def main():
             if procs:
                 try:
                     p = procs[0]
-                    proc = psutil.Process(p.info["pid"])
-                    detail_parts.append(f"PID:{proc.pid}")
-                    cpu = proc.cpu_percent(interval=0)
-                    detail_parts.append(f"CPU:{cpu:.0f}%")
+                    pname = p.info["name"] or "?"
+                    pid = p.info["pid"]
+                    cpu = detector.last_cpu
+                    cmd = " ".join(p.info["cmdline"] or [""])[:60]
+                    detail_parts.append(f"{pname}({pid}) CPU:{cpu:.0f}%")
                 except:
                     pass
 
