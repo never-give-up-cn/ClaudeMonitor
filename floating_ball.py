@@ -664,12 +664,12 @@ class FloatingBall:
                 # Use proper Python (not pyw.exe which needs -3 flag)
                 py_exe = sys.executable
                 bn = os.path.basename(py_exe).lower()
-                if bn in ('pyw.exe', 'pythonw.exe'):
-                    py_exe = py_exe.replace('pyw.exe', 'python.exe').replace('pythonw.exe', 'python.exe')
-                if not os.path.exists(py_exe):
-                    py_exe = 'python'
+                if bn in ('python.exe', 'py.exe'):
+                    pyw = py_exe.replace('python.exe', 'pythonw.exe').replace('py.exe', 'pyw.exe')
+                    if os.path.exists(pyw):
+                        py_exe = pyw
                 subprocess.Popen([py_exe, str(gui_path)],
-                                 creationflags=subprocess.CREATE_NO_WINDOW if 'pythonw' not in py_exe and sys.platform == 'win32' else 0)
+                                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
             except Exception:
                 pass
 
@@ -997,11 +997,12 @@ class FloatingBall:
                     try:
                         py_exe = sys.executable
                         bn = os.path.basename(py_exe).lower()
-                        if bn in ("pyw.exe", "pythonw.exe"):
-                            py_exe = py_exe.replace("pyw.exe", "python.exe").replace("pythonw.exe", "python.exe")
-                        if not os.path.exists(py_exe):
-                            py_exe = "python"
-                        subprocess.Popen([py_exe, str(gui_path)])
+                        if bn in ("python.exe", "py.exe"):
+                            pyw = py_exe.replace("python.exe", "pythonw.exe").replace("py.exe", "pyw.exe")
+                            if os.path.exists(pyw):
+                                py_exe = pyw
+                        subprocess.Popen([py_exe, str(gui_path)],
+                                         creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
                     except Exception:
                         pass
 
