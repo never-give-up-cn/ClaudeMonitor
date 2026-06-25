@@ -163,6 +163,7 @@ tr:hover td { background: #2a3a2a; }
     <h1>📋 Claude Code 对话日志</h1>
     <div class="summary" id="summary">加载中...</div>
     <button onclick="location.reload()" style="background:#3a3a5a;color:#ccc;border:none;padding:5px 14px;border-radius:4px;cursor:pointer;">🔄 刷新</button>
+    <button id="autoBtn" onclick="toggleAuto()" style="background:#2a5a2a;color:#ccc;border:none;padding:5px 14px;border-radius:4px;cursor:pointer;">⏱ 自动:开</button>
 </div>
 <div class="search-bar">
     <label>日期从:</label>
@@ -201,6 +202,7 @@ tr:hover td { background: #2a3a2a; }
 </div>
 <script>
 let currentPage = 1, totalPages = 1, pageSize = 50;
+let autoRefresh = true, autoTimer = null;
 function loadSummary() {
     fetch('/api/summary').then(r=>r.json()).then(d=>{
         document.getElementById('summary').textContent =
@@ -296,9 +298,24 @@ function showDetail(r) {
 function closeModal() { document.getElementById('modal').style.display = 'none'; }
 function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function escAttr(s) { return esc(s).replace(/"/g,'&quot;'); }
+function toggleAuto() {
+    autoRefresh = !autoRefresh;
+    const btn = document.getElementById('autoBtn');
+    btn.textContent = autoRefresh ? '⏱ 自动:开' : '⏱ 自动:关';
+    btn.style.background = autoRefresh ? '#2a5a2a' : '#5a3a3a';
+    if (autoRefresh) { startAutoRefresh(); }
+    else { if (autoTimer) { clearInterval(autoTimer); autoTimer = null; } }
+}
+function startAutoRefresh() {
+    if (autoTimer) clearInterval(autoTimer);
+    autoTimer = setInterval(() => {
+        if (autoRefresh) { loadSummary(); loadPage(); }
+    }, 3000);
+}
 document.getElementById('keyword').addEventListener('keyup', e => { if(e.key==='Enter') search(); });
 loadSummary();
 loadPage();
+startAutoRefresh();
 </script>
 </body>
 </html>"""

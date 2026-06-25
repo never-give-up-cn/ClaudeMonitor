@@ -63,6 +63,8 @@ class LogViewer:
         self.total_records = 0
         self.total_pages = 1
         self.all_data = []  # 缓存当前搜索的所有数据
+        self.auto_refresh = True
+        self._refresh_timer = None
 
         self._build_ui()
         self._load_data()
@@ -122,6 +124,12 @@ class LogViewer:
                                      font=FONT_SMALL, bg="#3a3a5a", fg="#cccccc",
                                      relief=tk.FLAT, padx=14, pady=2, cursor="hand2")
         self.refresh_btn.pack(side=tk.LEFT, padx=(4, 4))
+
+        # 自动刷新开关
+        self.auto_refresh_btn = tk.Button(search_frame, text="自动:开", command=self._toggle_auto_refresh,
+                                          font=FONT_SMALL, bg="#3a5a3a", fg="#cccccc",
+                                          relief=tk.FLAT, padx=14, pady=2, cursor="hand2")
+        self.auto_refresh_btn.pack(side=tk.LEFT, padx=(4, 4))
 
         # 趋势图按钮
         self.chart_btn = tk.Button(search_frame, text="趋势图", command=self.open_chart,
@@ -259,6 +267,28 @@ class LogViewer:
                                          font=FONT_SMALL, bg="#3a5a3a", fg="#cccccc",
                                          relief=tk.FLAT, padx=10, pady=1, cursor="hand2")
         self.export_html_btn.pack(side=tk.RIGHT, padx=(2, 2))
+
+        # 启动自动刷新
+        self.win.after(100, self._start_auto_refresh)
+
+    def _start_auto_refresh(self):
+        """启动自动刷新定时器"""
+        if self.auto_refresh:
+            self._load_data()
+            self._refresh_timer = self.win.after(3000, self._start_auto_refresh)
+
+    def _toggle_auto_refresh(self):
+        """切换自动刷新"""
+        self.auto_refresh = not self.auto_refresh
+        self.auto_refresh_btn.config(
+            text=f"自动:{'开' if self.auto_refresh else '关'}",
+            bg="#3a5a3a" if self.auto_refresh else "#5a3a3a"
+        )
+        if self.auto_refresh:
+            self._start_auto_refresh()
+        elif self._refresh_timer:
+            self.win.after_cancel(self._refresh_timer)
+            self._refresh_timer = None
 
     def _load_data(self):
         """加载日志数据"""
