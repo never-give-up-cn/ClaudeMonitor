@@ -171,6 +171,58 @@ ClaudeMonitor/
 
 `floating_ball.py` 全面升级：大圆角磨砂玻璃容器、AMD GPU 检测（通过 Windows 性能计数器）、显存从注册表读取（正确识别 12GB VRAM）、后台线程采集数据不阻塞 UI。
 
+## 踩坑记录
+
+一路上踩了不少坑，记下来供参考：
+
+### 1. Python 2/3 混装导致 f-string 崩溃
+
+系统同时装了 Python 2.7（Anaconda）和 Python 3.13（Microsoft Store），`python` 指向 2.7，f-string 全部报 `SyntaxError`。`start.bat` 最初只用 `where python3` 检测，但 Windows 下 `python3` 不一定存在。修复：先用 `py -3` launcher，再 `python3`，最后 `python` + 版本检查。
+
+### 2. 子进程枚举竞态
+
+遍历 Claude Code 子进程时获取 `c.name()`，如果进程刚好在那一瞬间退出，`psutil` 会抛 `NoSuchProcess` 导致整个监控器崩溃。修复：每个子进程单独 `try/except`。
+
+### 3. PowerShell 超时 + 弹窗
+
+GPU 检测用 `subprocess.run(["powershell", "-Command", ps_cmd])`，`-Command` 模式下 `Get-Counter` 会莫名超时（最长 8 秒），而且每次调用都会闪一个 PowerShell 窗口。修复：改写成临时 `.ps1` 文件用 `-File` 模式执行，加 `CREATE_NO_WINDOW` 标志。
+
+### 4. 悬浮球右键无反应
+
+菜单在每次右键时重新创建，加上 GPU 检测在主线程同步执行，导致界面卡死。修复：菜单预构建一次缓存，GPU 数据采集移到后台线程。
+
+### 5. 悬浮窗启动崩溃
+
+`menu.add_command()` 返回 `None`，传进 `menu.index(None)` 抛 Tcl 异常，整个窗口起不来。修复：直接用 `menu.entryconfig("标签名")` 按标签查找。
+
+### 6. 悬浮球吸附后不会自动隐藏
+
+`_on_leave` 的条件是 `if not self._snapped or not self._hidden_mode: return`，展开时 `_hidden_mode=False`，条件为真直接返回，不启动隐藏定时器。修复：去掉 `_hidden_mode` 检查，吸附状态下鼠标离开一律启动隐藏。
+
+### 7. 8 位颜色码导致 Tkinter 崩溃
+
+Tkinter Canvas 不支持 `#ffffff18` 等带透明度的 8 位十六进制颜色，直接报错无法启动。修复：全部改用 6 位纯色。
+
+### 8. 文件编码被 PowerShell 写坏
+
+用 PowerShell 的 `Set-Content` 写入 Python 文件，默认 ANSI 编码把中文全部变成乱码。`SyntaxError: invalid character '℃'` 排查了半天。修复：全程用 Python 读写文件，或者 PowerShell 加 `-Encoding utf8`。
+
+### 9. AMD GPU 检测不到
+
+默认只写 `nvidia-smi` 检测，用户是 AMD RX 6750 XT，一直显示 `GPU:--`。修复：加 Windows 性能计数器 (`GPU Engine`) 和注册表读取 (`HardwareInformation.qwMemorySize`) 双重回退。
+
+### 10. 显存大小读错
+
+`Win32_VideoController.AdapterRAM` 返回 4GB，实际是 12GB。WMI 对现代显卡的显存报告不准。修复：从注册表 `HKLM\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}\*\HardwareInformation.qwMemorySize` 读取。
+
+### 11. overrideredirect 后无法最小化
+
+自定义标题栏用 `overrideredirect(True)` 移除了原生标题栏，但也失去了 `Alt+Tab` 和任务栏行为。修复：手动实现最小化按钮 `root.iconify()`，托盘功能通过 `pystray` 实现。
+
+### 12. 按钮一多就溢出
+
+底部 7 个按钮总宽超过窗口宽度，`padx=20` 时部分按钮被裁剪消失。反复调整窗口宽度 520→560→640，最终用 `padx=10` + 9px 字体才稳定。
+
 ## 配置
 
 编辑 `gui.py` 或 `monitor.py` 开头的 `CONFIG` 字典:
