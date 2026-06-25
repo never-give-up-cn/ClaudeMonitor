@@ -25,6 +25,7 @@ if %errorlevel% neq 0 (
     %PY_CMD% -m pip install pyserial psutil -q
 )
 
+:: ===== Console only =====
 if /i "%MODE%"=="console" (
     title Claude Monitor - Console
     echo ========================================
@@ -36,35 +37,47 @@ if /i "%MODE%"=="console" (
     goto :eof
 )
 
+:: ===== GUI only =====
 if /i "%MODE%"=="gui" (
-    title Claude Monitor
+    title Claude Monitor - Desktop
     echo ========================================
     echo   Claude Code Monitor (Desktop)
     echo ========================================
     echo.
-    start "" %PY_CMD% gui.py
+    start /b %PY_CMD% gui.py >"%CD%\gui.log" 2>&1
+    echo [INFO] GUI started. Check desktop for window.
+    timeout /t 3 /nobreak >nul
     goto :eof
 )
 
-:: ===== both mode (default) =====
-title Claude Monitor
+:: ===== Both (default) =====
+title Claude Code Monitor
 echo ========================================
 echo   Claude Code Monitor
 echo ========================================
 echo.
 
-:: start desktop window in background
-echo [INFO] Launching desktop window...
-start "" %PY_CMD% gui.py
-timeout /t 1 /nobreak >nul
+:: Launch GUI in background
+echo [INFO] Starting GUI window...
+start /b %PY_CMD% gui.py >"%CD%\gui.log" 2>&1
 
-:: start console monitor in current window
-echo [INFO] Starting console monitor...
+:: Wait for GUI to initialize
+timeout /t 2 /nobreak >nul
+
+:: Check log for errors silently
+findstr /m "Traceback" "%CD%\gui.log" >nul 2>&1
+if %errorlevel% equ 0 (
+    echo [WARN] gui.py had errors. Check gui.log
+) else (
+    echo [INFO] GUI is running.
+)
+
+:: Launch console monitor in foreground
 echo.
+echo [INFO] Starting console monitor...
 echo -------------------------------------------------
-echo  Both monitor and GUI are running.
-echo  Close this window to stop console monitor.
-echo  Close the GUI window separately.
+echo  GUI window + Console both running
+echo  Close this window = stop console monitor
 echo -------------------------------------------------
 echo.
 %PY_CMD% monitor.py
