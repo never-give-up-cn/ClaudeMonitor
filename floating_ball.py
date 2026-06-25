@@ -713,15 +713,16 @@ class FloatingBall:
         self._draw_ball(self.bs)
 
     def _on_enter(self, event):
-        if not self._snapped or not self._hidden_mode:
+        if not self._snapped:
             return
         if self._leave_timer:
             self.root.after_cancel(self._leave_timer)
             self._leave_timer = None
-        self._slide_out()
+        if self._hidden_mode:
+            self._slide_out()
 
     def _on_leave(self, event):
-        if not self._snapped or not self._hidden_mode:
+        if not self._snapped:
             return
         if self._leave_timer:
             self.root.after_cancel(self._leave_timer)
