@@ -17,7 +17,7 @@ from pathlib import Path
 
 try:
     import tkinter as tk
-    from tkinter import ttk
+    from tkinter import ttk, font
 except ImportError:
     print("错误: 需要 tkinter。请安装 python3-tk")
     sys.exit(1)
@@ -312,8 +312,30 @@ class StateDetector:
 
 
 # ============================================================
-# 主窗口
+# 主窗口 (字体定义)
 # ============================================================
+
+# 检测可用字体：优先微软雅黑，回退默认
+try:
+    font.Font(family="微软雅黑", size=10).measure("测")
+    FONT_CN = ("微软雅黑", 10)
+    FONT_CN_BOLD = ("微软雅黑", 10, "bold")
+    FONT_TITLE = ("微软雅黑", 11, "bold")
+    FONT_ICON = ("微软雅黑", 40)
+    FONT_STATUS = ("微软雅黑", 26, "bold")
+    FONT_SMALL = ("微软雅黑", 9)
+except:
+    FONT_CN = ("TkDefaultFont", 10)
+    FONT_CN_BOLD = ("TkDefaultFont", 10, "bold")
+    FONT_TITLE = ("TkDefaultFont", 11, "bold")
+    FONT_ICON = ("TkDefaultFont", 40)
+    FONT_STATUS = ("TkDefaultFont", 26, "bold")
+    FONT_SMALL = ("TkDefaultFont", 9)
+
+FONT_EN = ("Consolas", 10)
+FONT_EN_SM = ("Consolas", 9)
+
+
 class ClaudeMonitorGUI:
     def __init__(self):
         self.root = tk.Tk()
@@ -322,8 +344,17 @@ class ClaudeMonitorGUI:
         self.root.resizable(False, False)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
-        # 窗口大小和位置
-        self.win_w, self.win_h = 420, 320
+        # 窗口尺寸
+        self.win_w, self.win_h = 480, 380
+        self.root.minsize(self.win_w, self.win_h)
+
+        # 居中显示
+        sw = self.root.winfo_screenwidth()
+        sh = self.root.winfo_screenheight()
+        x = (sw - self.win_w) // 2
+        y = (sh - self.win_h) // 2
+        self.root.geometry(f"{self.win_w}x{self.win_h}+{x}+{y}")
+
         self._make_draggable()
 
         # 初始化组件
@@ -365,15 +396,15 @@ class ClaudeMonitorGUI:
         self.root.configure(bg="#1e1e1e")
 
         # 主容器
-        main = tk.Frame(self.root, bg="#1e1e1e", padx=20, pady=15)
+        main = tk.Frame(self.root, bg="#1e1e1e", padx=24, pady=16)
         main.pack(fill=tk.BOTH, expand=True)
 
         # 标题栏
         title_frame = tk.Frame(main, bg="#1e1e1e")
-        title_frame.pack(fill=tk.X, pady=(0, 10))
+        title_frame.pack(fill=tk.X, pady=(0, 8))
 
         tk.Label(title_frame, text="Claude Code 状态监控",
-                 font=("微软雅黑", 11, "bold"), fg="#ffffff", bg="#1e1e1e").pack(side=tk.LEFT)
+                 font=FONT_TITLE, fg="#ffffff", bg="#1e1e1e").pack(side=tk.LEFT)
 
         self.serial_indicator = tk.Canvas(title_frame, width=12, height=12,
                                            bg="#1e1e1e", highlightthickness=0)
@@ -382,57 +413,60 @@ class ClaudeMonitorGUI:
                                                               fill="#555555", outline="")
 
         tk.Label(title_frame, text="串口",
-                 font=("微软雅黑", 8), fg="#888888", bg="#1e1e1e").pack(side=tk.RIGHT)
+                 font=FONT_SMALL, fg="#888888", bg="#1e1e1e").pack(side=tk.RIGHT)
 
         # 分割线
         sep = tk.Frame(main, height=1, bg="#333333")
-        sep.pack(fill=tk.X, pady=(0, 15))
+        sep.pack(fill=tk.X, pady=(0, 12))
 
-        # 状态主显示区
-        self.status_icon_label = tk.Label(main, text="●",
-                                          font=("微软雅黑", 36), bg="#1e1e1e")
-        self.status_icon_label.pack(pady=(0, 2))
+        # 状态主显示区 (垂直居中)
+        status_area = tk.Frame(main, bg="#1e1e1e")
+        status_area.pack(expand=True, fill=tk.BOTH)
 
-        self.status_cn_label = tk.Label(main, text="空闲",
-                                        font=("微软雅黑", 26, "bold"), bg="#1e1e1e")
+        self.status_icon_label = tk.Label(status_area, text="●",
+                                          font=FONT_ICON, bg="#1e1e1e")
+        self.status_icon_label.pack(pady=(12, 2))
+
+        self.status_cn_label = tk.Label(status_area, text="空闲",
+                                        font=FONT_STATUS, bg="#1e1e1e")
         self.status_cn_label.pack()
 
-        self.status_en_label = tk.Label(main, text="IDLE",
-                                        font=("Consolas", 12), bg="#1e1e1e")
-        self.status_en_label.pack(pady=(0, 8))
+        self.status_en_label = tk.Label(status_area, text="IDLE",
+                                        font=FONT_EN, bg="#1e1e1e")
+        self.status_en_label.pack(pady=(4, 6))
 
-        self.status_code_label = tk.Label(main, text="状态码: 0",
-                                          font=("Consolas", 10), bg="#1e1e1e", fg="#888888")
+        self.status_code_label = tk.Label(status_area, text="状态码: 0",
+                                          font=FONT_EN_SM, bg="#1e1e1e", fg="#888888")
         self.status_code_label.pack()
 
         # 详情栏
-        detail_frame = tk.Frame(main, bg="#252525", padx=12, pady=8)
-        detail_frame.pack(fill=tk.X, pady=(8, 0))
+        detail_frame = tk.Frame(main, bg="#252525", padx=14, pady=10)
+        detail_frame.pack(fill=tk.X, pady=(10, 0))
 
         self.cpu_label = tk.Label(detail_frame, text="CPU: --",
-                                  font=("Consolas", 10), bg="#252525", fg="#aaaaaa")
+                                  font=FONT_EN, bg="#252525", fg="#aaaaaa")
         self.cpu_label.pack(anchor=tk.W)
 
         self.proc_label = tk.Label(detail_frame, text="进程: --",
-                                   font=("Consolas", 9), bg="#252525", fg="#777777")
-        self.proc_label.pack(anchor=tk.W)
+                                   font=FONT_EN_SM, bg="#252525", fg="#777777")
+        self.proc_label.pack(anchor=tk.W, pady=(2, 0))
 
         # 底部按钮
         btn_frame = tk.Frame(main, bg="#1e1e1e")
         btn_frame.pack(fill=tk.X, pady=(10, 0))
 
         self.status_bar = tk.Label(btn_frame, text="就绪",
-                                   font=("微软雅黑", 9), fg="#666666", bg="#1e1e1e")
+                                   font=FONT_SMALL, fg="#666666", bg="#1e1e1e")
         self.status_bar.pack(side=tk.LEFT)
 
         self.pin_btn = tk.Button(btn_frame, text="置顶", command=self.toggle_pin,
-                                 font=("微软雅黑", 9), bg="#333333", fg="#cccccc",
-                                 relief=tk.FLAT, padx=12, cursor="hand2")
+                                 font=FONT_SMALL, bg="#333333", fg="#cccccc",
+                                 relief=tk.FLAT, padx=14, pady=2, cursor="hand2")
         self.pin_btn.pack(side=tk.RIGHT, padx=(4, 0))
 
         self.quit_btn = tk.Button(btn_frame, text="退出", command=self.on_close,
-                                  font=("微软雅黑", 9), bg="#5c1a1a", fg="#cccccc",
-                                  relief=tk.FLAT, padx=12, cursor="hand2")
+                                  font=FONT_SMALL, bg="#5c1a1a", fg="#cccccc",
+                                  relief=tk.FLAT, padx=14, pady=2, cursor="hand2")
         self.quit_btn.pack(side=tk.RIGHT, padx=(4, 0))
 
         self._is_pinned = False

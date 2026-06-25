@@ -6,23 +6,23 @@ if "%MODE%"=="" set MODE=both
 
 cd /d "%~dp0"
 
-:: find python
+:: find real python path (resolve App Execution Alias)
 set PY_CMD=python
-where python3 >nul 2>&1
-if %errorlevel% equ 0 set PY_CMD=python3
-
-where %PY_CMD% >nul 2>&1
-if %errorlevel% neq 0 (
+for /f "delims=" %%i in ('where python3 2^>nul') do set PY_CMD=%%i
+if "%PY_CMD%"=="" for /f "delims=" %%i in ('where python 2^>nul') do set PY_CMD=%%i
+if "%PY_CMD%"=="" (
     echo [ERROR] Python not found. Install Python 3.7+
     pause
     exit /b 1
 )
 
+echo [INFO] Using Python: %PY_CMD%
+
 :: install deps
 %PY_CMD% -c "import serial, psutil" >nul 2>&1
 if %errorlevel% neq 0 (
     echo [INFO] Installing dependencies...
-    %PY_CMD% -m pip install pyserial psutil -q
+    "%PY_CMD%" -m pip install pyserial psutil -q
 )
 
 :: ===== Console only =====
@@ -32,7 +32,7 @@ if /i "%MODE%"=="console" (
     echo   Claude Code Monitor (Console)
     echo ========================================
     echo.
-    %PY_CMD% monitor.py
+    "%PY_CMD%" monitor.py
     pause
     goto :eof
 )
@@ -44,9 +44,7 @@ if /i "%MODE%"=="gui" (
     echo   Claude Code Monitor (Desktop)
     echo ========================================
     echo.
-    start /b %PY_CMD% gui.py >"%CD%\gui.log" 2>&1
-    echo [INFO] GUI started. Check desktop for window.
-    timeout /t 3 /nobreak >nul
+    start "Claude GUI" "%PY_CMD%" gui.py
     goto :eof
 )
 
@@ -57,30 +55,21 @@ echo   Claude Code Monitor
 echo ========================================
 echo.
 
-:: Launch GUI in background
+:: Launch GUI in a new window (uses real python path, no encoding issues)
 echo [INFO] Starting GUI window...
-start /b %PY_CMD% gui.py >"%CD%\gui.log" 2>&1
+start "Claude GUI" "%PY_CMD%" gui.py
 
 :: Wait for GUI to initialize
-timeout /t 2 /nobreak >nul
-
-:: Check log for errors silently
-findstr /m "Traceback" "%CD%\gui.log" >nul 2>&1
-if %errorlevel% equ 0 (
-    echo [WARN] gui.py had errors. Check gui.log
-) else (
-    echo [INFO] GUI is running.
-)
+timeout /t 3 /nobreak >nul
 
 :: Launch console monitor in foreground
-echo.
 echo [INFO] Starting console monitor...
 echo -------------------------------------------------
-echo  GUI window + Console both running
+echo  GUI + Console both running
 echo  Close this window = stop console monitor
 echo -------------------------------------------------
 echo.
-%PY_CMD% monitor.py
+"%PY_CMD%" monitor.py
 
 echo.
 echo [INFO] Console monitor stopped.
