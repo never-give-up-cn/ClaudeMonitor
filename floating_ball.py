@@ -1009,7 +1009,8 @@ class FloatingBall:
                 pystray.MenuItem("退出", tray_quit),
             )
 
-            self._tray_icon = pystray.Icon("claude_monitor", img, "Claude 监控", menu)
+            self._tray_icon = pystray.Icon("claude_monitor", img, "Claude 监控", menu,
+                                            default_action=tray_show)
 
             # 在后台线程运行托盘
             import threading

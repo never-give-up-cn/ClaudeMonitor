@@ -50,7 +50,8 @@ def setup_tray(gui, on_show=None, on_quit=None):
             pystray.MenuItem("退出", lambda: on_quit() if on_quit else None),
         )
 
-        TRAY_ICON = pystray.Icon("claude_monitor", icon_img, "Claude Code 监控", menu)
+        TRAY_ICON = pystray.Icon("claude_monitor", icon_img, "Claude Code 监控", menu,
+                                  default_action=lambda: on_show() if on_show else None)
 
         def run_tray():
             try:
