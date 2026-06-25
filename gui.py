@@ -72,6 +72,13 @@ try:
 except ImportError:
     SINGLE_OK = False
 
+try:
+    import pystray
+    from PIL import Image, ImageDraw
+    HAS_TRAY = True
+except ImportError:
+    HAS_TRAY = False
+
 
 # ============================================================
 # 配置
@@ -401,7 +408,7 @@ class ClaudeMonitorGUI:
         self._ring_angle = 0
 
         # 窗口尺寸
-        self.win_w, self.win_h = 560, 420
+        self.win_w, self.win_h = 640, 420
         self.root.minsize(self.win_w, self.win_h)
 
         sw = self.root.winfo_screenwidth()
@@ -637,8 +644,8 @@ class ClaudeMonitorGUI:
         # Right buttons (uniform style)
         def mk_btn(text, cmd, color="#2C313A"):
             btn = tk.Button(btn_frame, text=text, command=cmd,
-                           font=("Consolas", 10), bg=color, fg="#A0A8B8",
-                           relief="flat", padx=10, pady=4, cursor="hand2",
+                           font=("Consolas", 9), bg=color, fg="#A0A8B8",
+                           relief="flat", padx=8, pady=4, cursor="hand2",
                            activebackground="#3B414E", activeforeground="#56E3F5")
             btn.pack(side=tk.RIGHT, padx=(4, 0))
             btn.bind("<Enter>", lambda e: btn.configure(bg="#3B414E", fg="#56E3F5"))
