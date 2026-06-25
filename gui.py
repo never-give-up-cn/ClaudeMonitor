@@ -646,47 +646,12 @@ class ClaudeMonitorGUI:
             return btn
 
         mk_btn("退出", self.on_close, "#2C313A")
-        mk_btn("托盘", self.toggle_tray)
+        self.tray_btn = mk_btn("托盘", self.toggle_tray)
         mk_btn("趋势图", self.open_chart)
         mk_btn("Web日志", self.open_web_viewer)
         self.sound_btn = mk_btn("音效:开", self.toggle_sound)
         mk_btn("查看日志", self.open_log_viewer)
         mk_btn("置顶", self.toggle_pin)
-
-        self._is_pinned = False
-        self.quit_btn.pack(side=tk.RIGHT, padx=(4, 0))
-
-        self.tray_btn = tk.Button(btn_frame, text="托盘", command=self.toggle_tray,
-                                  font=FONT_SMALL, bg="#3a3a5a", fg="#cccccc",
-                                  relief=tk.FLAT, padx=10, pady=2, cursor="hand2")
-        self.tray_btn.pack(side=tk.RIGHT, padx=(4, 0))
-
-        self.chart_btn = tk.Button(btn_frame, text="趋势图", command=self.open_chart,
-                                   font=FONT_SMALL, bg="#5a3a5a", fg="#cccccc",
-                                   relief=tk.FLAT, padx=10, pady=2, cursor="hand2")
-        self.chart_btn.pack(side=tk.RIGHT, padx=(4, 0))
-
-        self.web_btn = tk.Button(btn_frame, text="Web 日志", command=self.open_web_viewer,
-                                 font=FONT_SMALL, bg="#3a5a3a", fg="#cccccc",
-                                 relief=tk.FLAT, padx=10, pady=2, cursor="hand2")
-        self.web_btn.pack(side=tk.RIGHT, padx=(4, 0))
-
-        self.sound_btn = tk.Button(btn_frame, text="音效:开", command=self.toggle_sound,
-                                   font=FONT_SMALL, bg="#5a5a3a", fg="#cccccc",
-                                   relief=tk.FLAT, padx=10, pady=2, cursor="hand2")
-        self.sound_btn.pack(side=tk.RIGHT, padx=(4, 0))
-
-        self.log_btn = tk.Button(btn_frame, text="查看日志", command=self.open_log_viewer,
-                                 font=FONT_SMALL, bg="#2a5a5a", fg="#cccccc",
-                                 relief=tk.FLAT, padx=14, pady=2, cursor="hand2")
-        self.log_btn.pack(side=tk.RIGHT, padx=(4, 0))
-
-        self.pin_btn = tk.Button(btn_frame, text="置顶", command=self.toggle_pin,
-                                 font=FONT_SMALL, bg="#333333", fg="#cccccc",
-                                 relief=tk.FLAT, padx=14, pady=2, cursor="hand2")
-        self.pin_btn.pack(side=tk.RIGHT, padx=(4, 0))
-        self.quit_btn.pack(side=tk.RIGHT, padx=(4, 0))
-
         self._is_pinned = False
 
         self._is_pinned = not self._is_pinned
