@@ -981,6 +981,9 @@ class FloatingBall:
 
             # 构建菜单（与浮窗右键菜单同步）
             def tray_show():
+                self.root.after(0, _do_show)
+
+            def _do_show():
                 self.root.deiconify()
                 self.root.lift()
                 self.root.focus_force()
@@ -1011,6 +1014,20 @@ class FloatingBall:
 
             self._tray_icon = pystray.Icon("claude_monitor", img, "Claude 监控", menu,
                                             default_action=tray_show)
+
+            # Patch left-click to show window (Win32)
+            try:
+                if hasattr(self._tray_icon, '_on_notify'):
+                    _orig = self._tray_icon._on_notify
+                    _LBUTTON = 0x202
+                    def _patched(w, l):
+                        if l == _LBUTTON:
+                            tray_show()
+                            return
+                        _orig(w, l)
+                    self._tray_icon._on_notify = _patched
+            except Exception:
+                pass
 
             # 在后台线程运行托盘
             import threading

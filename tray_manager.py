@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-系统托盘管理
-============
-支持最小化到系统托盘，可选依赖 pystray。
+System tray manager with single-click support on Windows.
+Left-click shows window, right-click shows menu.
 """
 
 import threading
-import os
 
 HAS_TRAY = False
 TRAY_ICON = None
+WM_LBUTTONUP = 0x202
+WM_RBUTTONUP = 0x205
 
 try:
     import pystray
@@ -21,7 +21,6 @@ except ImportError:
 
 
 def _create_icon():
-    """创建托盘图标（16x16 简单图标）"""
     try:
         img = Image.new("RGBA", (16, 16), (0, 0, 0, 0))
         draw = ImageDraw.Draw(img)
@@ -33,7 +32,7 @@ def _create_icon():
 
 
 def setup_tray(gui, on_show=None, on_quit=None):
-    """设置系统托盘图标（返回是否成功）"""
+    """Setup system tray icon. Left-click shows window, right-click opens menu."""
     global TRAY_ICON
     if not HAS_TRAY:
         return False
@@ -44,14 +43,26 @@ def setup_tray(gui, on_show=None, on_quit=None):
             return False
 
         menu = (
-            pystray.MenuItem("显示窗口", lambda: on_show() if on_show else None),
+            pystray.MenuItem("显示窗口", lambda: on_show() if on_show else None, default=True),
             pystray.MenuItem("查看日志", lambda: gui.open_log_viewer()),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("退出", lambda: on_quit() if on_quit else None),
         )
 
-        TRAY_ICON = pystray.Icon("claude_monitor", icon_img, "Claude Code 监控", menu,
-                                  default_action=lambda: on_show() if on_show else None)
+        TRAY_ICON = pystray.Icon("claude_monitor", icon_img, "Claude Code 监控", menu)
+
+        # Patch: left-click shows window, right-click shows menu
+        if hasattr(TRAY_ICON, '_on_notify'):
+            original = TRAY_ICON._on_notify
+
+            def patched(wparam, lparam):
+                if lparam == WM_LBUTTONUP:
+                    if on_show:
+                        on_show()
+                    return
+                original(wparam, lparam)
+
+            TRAY_ICON._on_notify = patched
 
         def run_tray():
             try:
@@ -66,7 +77,6 @@ def setup_tray(gui, on_show=None, on_quit=None):
 
 
 def remove_tray():
-    """移除托盘图标"""
     global TRAY_ICON
     if TRAY_ICON:
         try:
@@ -77,7 +87,6 @@ def remove_tray():
 
 
 def notify_tray(title, message, duration=3):
-    """发送托盘通知"""
     global TRAY_ICON
     if TRAY_ICON and hasattr(TRAY_ICON, "notify"):
         try:
