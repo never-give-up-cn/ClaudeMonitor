@@ -393,6 +393,9 @@ class ClaudeMonitorGUI:
         self.root.resizable(False, False)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
+        # 上次日志轮数（用于检测新完成的任务）
+        self._last_log_turns = 0
+
         # 窗口尺寸
         self.win_w, self.win_h = 480, 440
         self.root.minsize(self.win_w, self.win_h)
@@ -632,6 +635,23 @@ class ClaudeMonitorGUI:
                 except Exception:
                     pass
                 self._log_action("进程退出")
+
+        # 对话日志检测：新轮次完成 → 提示音（比 CPU 检测更可靠）
+        if self.conversation_logger:
+            try:
+                summary = self.conversation_logger.get_summary()
+                turns = summary.get("turns", 0)
+                if turns > self._last_log_turns:
+                    self._last_log_turns = turns
+                    # 只在非首次检测且有实际内容时响
+                    if self._last_log_turns > 0:
+                        try:
+                            from sound_manager import play, SOUND_DONE
+                            play(SOUND_DONE)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
 
         en, cn, icon = STATUS[code]
         bg_color, fg_color = STATUS_COLORS[code]

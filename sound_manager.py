@@ -42,11 +42,11 @@ def play(sound_type=SOUND_NOTIFY):
 
     try:
         if sound_type == SOUND_DONE:
-            # 任务完成：两声轻快上升音 (880Hz + 1320Hz)
+            # 任务完成：两声上升音 (880Hz + 1320Hz)
             threading.Thread(target=lambda: (
-                _beep(880, 120),
-                time.sleep(0.12),
-                _beep(1320, 180),
+                _beep(880, 200),
+                time.sleep(0.15),
+                _beep(1320, 300),
             ), daemon=True).start()
 
         elif sound_type == SOUND_ACTION:
