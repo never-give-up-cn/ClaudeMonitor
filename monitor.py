@@ -651,6 +651,17 @@ def main():
             if status_code != last_status:
                 serial_mgr.send(status_code)
                 last_status = status_code
+                # 状态变更提示音
+                try:
+                    from sound_manager import play, SOUND_DONE, SOUND_ACTION, SOUND_ERROR
+                    if status_code == DONE:
+                        play(SOUND_DONE)
+                    elif status_code == WAITING:
+                        play(SOUND_ACTION)
+                    elif status_code == ERROR:
+                        play(SOUND_ERROR)
+                except Exception:
+                    pass
 
             # --- 串口重连（每 30 秒重试）---
             if not serial_ok:

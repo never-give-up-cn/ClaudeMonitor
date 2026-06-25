@@ -12,6 +12,7 @@ import time
 import os
 import threading
 import logging
+import subprocess
 from datetime import datetime
 from pathlib import Path
 
@@ -46,6 +47,24 @@ try:
     LOGGER_AVAILABLE = True
 except ImportError:
     LOGGER_AVAILABLE = False
+
+try:
+    from sound_manager import play, SOUND_DONE, SOUND_ACTION, SOUND_ERROR
+    SOUND_AVAILABLE = True
+except ImportError:
+    SOUND_AVAILABLE = False
+
+try:
+    from log_viewer import LogViewer, ChartWindow
+    VIEWER_AVAILABLE = True
+except ImportError:
+    VIEWER_AVAILABLE = False
+
+try:
+    import winsound
+    HAS_WINSOUND = True
+except ImportError:
+    HAS_WINSOUND = False
 
 
 # ============================================================
@@ -504,19 +523,41 @@ class ClaudeMonitorGUI:
                                    font=FONT_SMALL, fg="#666666", bg="#1e1e1e")
         self.status_bar.pack(side=tk.LEFT)
 
-        self.pin_btn = tk.Button(btn_frame, text="置顶", command=self.toggle_pin,
-                                 font=FONT_SMALL, bg="#333333", fg="#cccccc",
-                                 relief=tk.FLAT, padx=14, pady=2, cursor="hand2")
-        self.pin_btn.pack(side=tk.RIGHT, padx=(4, 0))
+        # 右侧按钮组（从右到左排列）
+        self.quit_btn = tk.Button(btn_frame, text="退出", command=self.on_close,
+                                  font=FONT_SMALL, bg="#5c1a1a", fg="#cccccc",
+                                  relief=tk.FLAT, padx=14, pady=2, cursor="hand2")
+        self.quit_btn.pack(side=tk.RIGHT, padx=(4, 0))
+
+        self.tray_btn = tk.Button(btn_frame, text="托盘", command=self.toggle_tray,
+                                  font=FONT_SMALL, bg="#3a3a5a", fg="#cccccc",
+                                  relief=tk.FLAT, padx=10, pady=2, cursor="hand2")
+        self.tray_btn.pack(side=tk.RIGHT, padx=(4, 0))
+
+        self.chart_btn = tk.Button(btn_frame, text="趋势图", command=self.open_chart,
+                                   font=FONT_SMALL, bg="#5a3a5a", fg="#cccccc",
+                                   relief=tk.FLAT, padx=10, pady=2, cursor="hand2")
+        self.chart_btn.pack(side=tk.RIGHT, padx=(4, 0))
+
+        self.web_btn = tk.Button(btn_frame, text="Web 日志", command=self.open_web_viewer,
+                                 font=FONT_SMALL, bg="#3a5a3a", fg="#cccccc",
+                                 relief=tk.FLAT, padx=10, pady=2, cursor="hand2")
+        self.web_btn.pack(side=tk.RIGHT, padx=(4, 0))
+
+        self.sound_btn = tk.Button(btn_frame, text="音效:开", command=self.toggle_sound,
+                                   font=FONT_SMALL, bg="#5a5a3a", fg="#cccccc",
+                                   relief=tk.FLAT, padx=10, pady=2, cursor="hand2")
+        self.sound_btn.pack(side=tk.RIGHT, padx=(4, 0))
 
         self.log_btn = tk.Button(btn_frame, text="查看日志", command=self.open_log_viewer,
                                  font=FONT_SMALL, bg="#2a5a5a", fg="#cccccc",
                                  relief=tk.FLAT, padx=14, pady=2, cursor="hand2")
         self.log_btn.pack(side=tk.RIGHT, padx=(4, 0))
 
-        self.quit_btn = tk.Button(btn_frame, text="退出", command=self.on_close,
-                                  font=FONT_SMALL, bg="#5c1a1a", fg="#cccccc",
-                                  relief=tk.FLAT, padx=14, pady=2, cursor="hand2")
+        self.pin_btn = tk.Button(btn_frame, text="置顶", command=self.toggle_pin,
+                                 font=FONT_SMALL, bg="#333333", fg="#cccccc",
+                                 relief=tk.FLAT, padx=14, pady=2, cursor="hand2")
+        self.pin_btn.pack(side=tk.RIGHT, padx=(4, 0))
         self.quit_btn.pack(side=tk.RIGHT, padx=(4, 0))
 
         self._is_pinned = False
@@ -533,8 +574,33 @@ class ClaudeMonitorGUI:
             return
 
         # 检测状态
+        old_code = self.detector.last_status
         code = self.detector.detect()
         self.detector.last_status = code
+
+        # 状态变更时播放提示音
+        if code != old_code:
+            if code == DONE:
+                try:
+                    from sound_manager import play, SOUND_DONE
+                    play(SOUND_DONE)
+                except Exception:
+                    pass
+                self._log_action("任务完成")
+            elif code == WAITING:
+                try:
+                    from sound_manager import play, SOUND_ACTION
+                    play(SOUND_ACTION)
+                except Exception:
+                    pass
+                self._log_action("等待用户操作")
+            elif code == ERROR:
+                try:
+                    from sound_manager import play, SOUND_ERROR
+                    play(SOUND_ERROR)
+                except Exception:
+                    pass
+                self._log_action("错误状态")
 
         en, cn, icon = STATUS[code]
         bg_color, fg_color = STATUS_COLORS[code]
@@ -617,13 +683,131 @@ class ClaudeMonitorGUI:
             import tkinter.messagebox as mb
             mb.showerror("错误", f"无法打开日志查看器:\n{e}")
 
+    def open_chart(self):
+        """打开 Token 趋势图"""
+        if not VIEWER_AVAILABLE:
+            import tkinter.messagebox as mb
+            mb.showinfo("提示", "请先打开日志查看器")
+            return
+        try:
+            ChartWindow(self.root, self.conversation_logger)
+        except Exception as e:
+            import tkinter.messagebox as mb
+            mb.showerror("错误", f"无法打开趋势图:\n{e}")
+
+    def open_web_viewer(self):
+        """启动 Web 版日志查看器"""
+        try:
+            from web_viewer import start_web_viewer
+            start_web_viewer(self.conversation_logger)
+        except ImportError:
+            import tkinter.messagebox as mb
+            mb.showinfo("提示", "Web 查看器未安装（web_viewer.py）")
+        except Exception as e:
+            import tkinter.messagebox as mb
+            mb.showerror("错误", f"无法启动 Web 查看器:\n{e}")
+
+    def toggle_sound(self):
+        """切换音效开关"""
+        try:
+            from sound_manager import ENABLED as sound_enabled
+            from sound_manager import play, SOUND_NOTIFY
+            new_state = not sound_enabled
+            import sound_manager
+            sound_manager.ENABLED = new_state
+            self.sound_btn.config(text=f"音效:{'开' if new_state else '关'}",
+                                  bg="#5a5a3a" if new_state else "#3a3a3a")
+            if new_state:
+                play(SOUND_NOTIFY)
+            self._log_action(f"音效 {'开启' if new_state else '关闭'}")
+        except Exception:
+            pass
+
+    def toggle_tray(self):
+        """最小化到系统托盘"""
+        if not HAS_TRAY:
+            import tkinter.messagebox as mb
+            mb.showinfo("提示", "系统托盘需要 pystray 库:\npip install pystray Pillow")
+            return
+
+        try:
+            from tray_manager import setup_tray, remove_tray
+
+            if hasattr(self, '_tray_active') and self._tray_active:
+                # 恢复窗口
+                self.root.deiconify()
+                self.root.lift()
+                remove_tray()
+                self._tray_active = False
+                self.tray_btn.config(text="托盘", bg="#3a3a5a")
+            else:
+                # 最小化到托盘
+                def on_show():
+                    self.root.deiconify()
+                    self.root.lift()
+                    self._tray_active = False
+                    self.tray_btn.config(text="托盘", bg="#3a3a5a")
+                    remove_tray()
+
+                def on_quit():
+                    remove_tray()
+                    self.on_close()
+
+                ok = setup_tray(self, on_show=on_show, on_quit=on_quit)
+                if ok:
+                    self.root.withdraw()
+                    self._tray_active = True
+                    self.tray_btn.config(text="窗口", bg="#2a5a2a")
+        except Exception as e:
+            import tkinter.messagebox as mb
+            mb.showerror("错误", f"托盘设置失败:\n{e}")
+
+    def _log_action(self, action):
+        """记录用户操作到对话日志"""
+        if not self.conversation_logger:
+            return
+        try:
+            import json
+            from datetime import datetime
+            log_file = self.conversation_logger.log_file
+            if not log_file:
+                return
+            # 写入一条操作记录（id=-1 标记操作用，后续忽略即可）
+            record = {
+                "id": -(int(time.time()) % 1000000),
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "user_input": f"[操作] {action}",
+                "assistant_output": "",
+                "assistant_thinking": "",
+                "model": "",
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "total_tokens": 0,
+                "cost": 0,
+                "session_id": "",
+            }
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        except Exception:
+            pass
+
     def on_close(self):
         self._running = False
+        try:
+            from tray_manager import remove_tray
+            remove_tray()
+        except Exception:
+            pass
         self.serial_mgr.close()
         if self.token_tracker:
             self.token_tracker.stop()
         if self.conversation_logger:
             self.conversation_logger.stop()
+        # 退出前记录
+        try:
+            self._log_action("退出监控")
+        except Exception:
+            pass
         self.root.destroy()
 
     def run(self):
