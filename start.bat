@@ -1,97 +1,130 @@
 @echo off
-chcp 65001 >nul
+chcp 65001 >nul 2>&1
 
 set MODE=%~1
 if "%MODE%"=="" set MODE=both
 
 cd /d "%~dp0"
 
-:: find python (prefer pythonw for no-console modes)
+:: ===== 找 Python 3 =====
+set PY_CMD=
+
+:: 1) Windows Python Launcher
+py -3 --version >nul 2>&1
+if errorlevel 1 goto :try_python3
+py -3 -c "import sys; sys.exit(0 if sys.version_info >= (3,7) else 1)" >nul 2>&1
+if errorlevel 1 goto :try_python3
+set PY_CMD=py -3
+set PY_CMD_W=py -3w
+goto :found_py
+
+:try_python3
+:: 2) python3
+python3 --version >nul 2>&1
+if errorlevel 1 goto :try_python
+python3 -c "import sys; sys.exit(0 if sys.version_info >= (3,7) else 1)" >nul 2>&1
+if errorlevel 1 goto :try_python
+set PY_CMD=python3
+set PY_CMD_W=pythonw
+goto :found_py
+
+:try_python
+:: 3) python (必须是 3.x)
+python --version 2>&1 | find "Python 3" >nul
+if errorlevel 1 goto :no_py
+python -c "import sys; sys.exit(0 if sys.version_info >= (3,7) else 1)" >nul 2>&1
+if errorlevel 1 goto :no_py
 set PY_CMD=python
 set PY_CMD_W=pythonw
-if exist "%SystemRoot%\py.exe" set PY_CMD=py -3
-where pythonw >nul 2>&1 || set PY_CMD_W=%PY_CMD%
+goto :found_py
 
-:: check python
-%PY_CMD% --version >nul 2>&1
-if errorlevel 1 (
-    echo [ERROR] Python 3 not found.
-    pause
-    exit /b 1
-)
+:no_py
+echo [ERROR] 需要 Python 3.7+，未找到。
+echo 请从 https://www.python.org/downloads/ 安装
+pause
+exit /b 1
 
-:: install deps silently
+:found_py
+:: ===== 安装依赖 =====
 %PY_CMD% -c "import serial, psutil" >nul 2>&1
 if errorlevel 1 (
-    echo [INFO] Installing dependencies...
-    %PY_CMD% -m pip install pyserial psutil -q
+    echo [INFO] 正在安装依赖 (pyserial, psutil)...
+    %PY_CMD% -m pip install pyserial psutil -q --trusted-host pypi.org --trusted-host files.pythonhosted.org 2>nul
+    %PY_CMD% -c "import serial, psutil" >nul 2>&1
+    if errorlevel 1 (
+        echo [INFO] 尝试使用国内镜像...
+        %PY_CMD% -m pip install pyserial psutil -q -i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn 2>nul
+    )
+    %PY_CMD% -c "import serial, psutil" >nul 2>&1
+    if errorlevel 1 (
+        echo [WARN] 依赖安装失败，部分功能可能不可用
+    ) else (
+        echo [OK] 依赖安装完成
+    )
 )
 
-:: ===== Floating ball only (hidden console) =====
+:: ===== 启动模式 =====
+
+:: Floating ball only
 if /i "%MODE%"=="ball" (
-    title Claude Monitor Ball
-    echo [INFO] Starting floating ball...
+    title Claude Monitor - Ball
+    echo [INFO] 启动桌面悬浮球...
     start "" "%PY_CMD_W%" "%CD%\floating_ball.py"
     goto :eof
 )
 
-:: ===== Console only =====
+:: Console only
 if /i "%MODE%"=="console" (
-    title Claude Monitor
-    echo [INFO] Starting console monitor...
+    title Claude Monitor - Console
+    echo [INFO] 启动控制台监控...
     %PY_CMD% monitor.py
     pause
     goto :eof
 )
 
-:: ===== GUI only (no console) =====
+:: GUI only (no console)
 if /i "%MODE%"=="gui" (
-    title Claude Monitor
-    echo [INFO] Starting GUI window...
+    title Claude Monitor - GUI
+    echo [INFO] 启动桌面窗口...
     start "" "%PY_CMD_W%" "%CD%\gui.py"
     goto :eof
 )
 
-:: ===== Both (default: GUI + console) =====
+:: Both: GUI + console (default)
 if /i "%MODE%"=="both" (
     title Claude Code Monitor
     echo ========================================
     echo   Claude Code Monitor
     echo ========================================
     echo.
-    echo [INFO] Starting GUI window + Console...
     start "" "%PY_CMD_W%" "%CD%\gui.py"
     timeout /t 2 /nobreak >nul
     %PY_CMD% monitor.py
     echo.
-    echo [INFO] Console monitor stopped.
     pause
     goto :eof
 )
 
-:: ===== Ball + GUI (floating ball + GUI in background) =====
+:: Desktop: floating ball + GUI background
 if /i "%MODE%"=="desktop" (
-    title Claude Monitor Desktop
+    title Claude Monitor - Desktop
     echo ========================================
     echo   Claude Monitor - Desktop Mode
     echo ========================================
     echo.
-    echo [INFO] Starting floating ball...
     start "" "%PY_CMD_W%" "%CD%\floating_ball.py"
     timeout /t 1 /nobreak >nul
-    echo [INFO] Starting GUI in background...
     start "" "%PY_CMD_W%" "%CD%\gui.py"
-    echo [INFO] Both running in background.
-    echo Close floating ball from its right-click menu.
+    echo [INFO] 悬浮球 + GUI 已在后台运行
+    echo 右键悬浮球可退出
     pause
     goto :eof
 )
 
-:: Fallback
 echo Usage: start.bat [ball^|console^|gui^|both^|desktop]
-echo   (default)  both     - GUI window + Console
-echo   ball       Floating ball only (no console)
-echo   console    Console monitor only
-echo   gui        GUI window only (hidden console)
-echo   desktop    Floating ball + GUI (no console)
+echo   (default)  both     - GUI窗口 + 控制台
+echo   ball       - 仅桌面悬浮球（无窗口）
+echo   console    - 仅控制台监控
+echo   gui        - 仅GUI窗口（无控制台）
+echo   desktop    - 悬浮球 + GUI（无控制台）
 pause
