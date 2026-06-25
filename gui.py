@@ -692,22 +692,40 @@ class ClaudeMonitorGUI:
         self.root.after(int(CONFIG["check_interval"] * 1000), self.update_status)
 
     def open_log_viewer(self):
-        """打开对话日志查看器"""
+        """打开对话日志查看器（单例）"""
+        if hasattr(self, '_log_win') and self._log_win:
+            try:
+                if self._log_win.winfo_exists():
+                    self._log_win.lift()
+                    self._log_win.focus_force()
+                    return
+            except Exception:
+                self._log_win = None
         try:
             from log_viewer import LogViewer
-            LogViewer(parent=self.root, logger=self.conversation_logger)
+            lv = LogViewer(parent=self.root, logger=self.conversation_logger)
+            self._log_win = lv.win
         except Exception as e:
             import tkinter.messagebox as mb
             mb.showerror("错误", f"无法打开日志查看器:\n{e}")
 
     def open_chart(self):
-        """打开 Token 趋势图"""
+        """打开 Token 趋势图（单例）"""
+        if hasattr(self, '_chart_win') and self._chart_win:
+            try:
+                if self._chart_win.winfo_exists():
+                    self._chart_win.lift()
+                    self._chart_win.focus_force()
+                    return
+            except Exception:
+                self._chart_win = None
         if not VIEWER_AVAILABLE:
             import tkinter.messagebox as mb
             mb.showinfo("提示", "请先打开日志查看器")
             return
         try:
-            ChartWindow(self.root, self.conversation_logger)
+            cw = ChartWindow(self.root, self.conversation_logger)
+            self._chart_win = cw.win
         except Exception as e:
             import tkinter.messagebox as mb
             mb.showerror("错误", f"无法打开趋势图:\n{e}")
