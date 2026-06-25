@@ -6,23 +6,33 @@ if "%MODE%"=="" set MODE=both
 
 cd /d "%~dp0"
 
-:: find python
+:: find python (prefer pythonw for no-console modes)
 set PY_CMD=python
-where python3 >nul 2>&1
-if %errorlevel% equ 0 set PY_CMD=python3
+set PY_CMD_W=pythonw
+if exist "%SystemRoot%\py.exe" set PY_CMD=py -3
+where pythonw >nul 2>&1 || set PY_CMD_W=%PY_CMD%
 
-where %PY_CMD% >nul 2>&1
-if %errorlevel% neq 0 (
+:: check python
+%PY_CMD% --version >nul 2>&1
+if errorlevel 1 (
     echo [ERROR] Python 3 not found.
     pause
     exit /b 1
 )
 
-:: install deps
+:: install deps silently
 %PY_CMD% -c "import serial, psutil" >nul 2>&1
-if %errorlevel% neq 0 (
+if errorlevel 1 (
     echo [INFO] Installing dependencies...
     %PY_CMD% -m pip install pyserial psutil -q
+)
+
+:: ===== Floating ball only (hidden console) =====
+if /i "%MODE%"=="ball" (
+    title Claude Monitor Ball
+    echo [INFO] Starting floating ball...
+    start "" "%PY_CMD_W%" "%CD%\floating_ball.py"
+    goto :eof
 )
 
 :: ===== Console only =====
@@ -34,37 +44,54 @@ if /i "%MODE%"=="console" (
     goto :eof
 )
 
-:: ===== GUI only =====
+:: ===== GUI only (no console) =====
 if /i "%MODE%"=="gui" (
     title Claude Monitor
     echo [INFO] Starting GUI window...
-    start "Claude GUI" %PY_CMD% gui.py
+    start "" "%PY_CMD_W%" "%CD%\gui.py"
     goto :eof
 )
 
-:: ===== Both (default) =====
-title Claude Code Monitor
-echo ========================================
-echo   Claude Code Monitor
-echo ========================================
-echo.
+:: ===== Both (default: GUI + console) =====
+if /i "%MODE%"=="both" (
+    title Claude Code Monitor
+    echo ========================================
+    echo   Claude Code Monitor
+    echo ========================================
+    echo.
+    echo [INFO] Starting GUI window + Console...
+    start "" "%PY_CMD_W%" "%CD%\gui.py"
+    timeout /t 2 /nobreak >nul
+    %PY_CMD% monitor.py
+    echo.
+    echo [INFO] Console monitor stopped.
+    pause
+    goto :eof
+)
 
-:: Launch GUI window in a new window
-echo [INFO] Starting GUI window...
-start "Claude GUI" %PY_CMD% gui.py
+:: ===== Ball + GUI (floating ball + GUI in background) =====
+if /i "%MODE%"=="desktop" (
+    title Claude Monitor Desktop
+    echo ========================================
+    echo   Claude Monitor - Desktop Mode
+    echo ========================================
+    echo.
+    echo [INFO] Starting floating ball...
+    start "" "%PY_CMD_W%" "%CD%\floating_ball.py"
+    timeout /t 1 /nobreak >nul
+    echo [INFO] Starting GUI in background...
+    start "" "%PY_CMD_W%" "%CD%\gui.py"
+    echo [INFO] Both running in background.
+    echo Close floating ball from its right-click menu.
+    pause
+    goto :eof
+)
 
-:: Wait for GUI to initialize
-timeout /t 2 /nobreak >nul
-
-:: Launch console monitor in current window
-echo [INFO] Starting console monitor...
-echo -------------------------------------------------
-echo  GUI window + Console both running
-echo  Close this window = stop console monitor
-echo -------------------------------------------------
-echo.
-%PY_CMD% monitor.py
-
-echo.
-echo [INFO] Console monitor stopped.
+:: Fallback
+echo Usage: start.bat [ball^|console^|gui^|both^|desktop]
+echo   (default)  both     - GUI window + Console
+echo   ball       Floating ball only (no console)
+echo   console    Console monitor only
+echo   gui        GUI window only (hidden console)
+echo   desktop    Floating ball + GUI (no console)
 pause
