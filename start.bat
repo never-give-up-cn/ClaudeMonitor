@@ -2,11 +2,8 @@
 chcp 65001 >nul
 title Claude Code 状态监控器
 
-echo ========================================
-echo   Claude Code 工作状态监控器
-echo   正在启动...
-echo ========================================
-echo.
+set MODE=%~1
+if "%MODE%"=="" set MODE=gui
 
 :: 切换到脚本所在目录
 cd /d "%~dp0"
@@ -26,14 +23,24 @@ if %errorlevel% neq 0 (
     python3 -m pip install pyserial psutil -q
 )
 
-:: 启动监控
-echo 启动时间: %date% %time%
-echo 监控目录: %USERPROFILE%\Desktop
-echo.
-echo 按 Ctrl+C 停止监控
-echo ========================================
-echo.
-
-python3 monitor.py
-
-pause
+if /i "%MODE%"=="console" (
+    title Claude Code 状态监控器 - 控制台版
+    echo ========================================
+    echo   Claude Code 工作状态监控器 (控制台版)
+    echo   启动时间: %date% %time%
+    echo   监控目录: %USERPROFILE%\Desktop
+    echo.
+    echo   按 Ctrl+C 停止监控
+    echo ========================================
+    echo.
+    python3 monitor.py
+    pause
+) else (
+    title Claude Code 状态监控器 - 桌面窗口版
+    echo ========================================
+    echo   Claude Code 工作状态监控器 (桌面窗口版)
+    echo   启动时间: %date% %time%
+    echo ========================================
+    echo.
+    start /b pythonw gui.py 2>nul || python3 gui.py
+)
