@@ -981,14 +981,29 @@ class FloatingBall:
 
             # 构建菜单（与浮窗右键菜单同步）
             def tray_show():
-                self.root.after(0, _do_show)
+                self.root.after(0, _open_gui_from_tray)
 
-            def _do_show():
-                self.root.deiconify()
-                self.root.lift()
-                self.root.focus_force()
-                if self._hidden_mode:
-                    self._slide_out()
+            def _open_gui_from_tray():
+                if SINGLE_OK:
+                    try:
+                        gi = SingleInstance("gui")
+                        if gi.is_running():
+                            gi.bring_to_front()
+                            return
+                    except Exception:
+                        pass
+                gui_path = SCRIPT_DIR / "gui.py"
+                if gui_path.exists():
+                    try:
+                        py_exe = sys.executable
+                        bn = os.path.basename(py_exe).lower()
+                        if bn in ("pyw.exe", "pythonw.exe"):
+                            py_exe = py_exe.replace("pyw.exe", "python.exe").replace("pythonw.exe", "python.exe")
+                        if not os.path.exists(py_exe):
+                            py_exe = "python"
+                        subprocess.Popen([py_exe, str(gui_path)])
+                    except Exception:
+                        pass
 
             def tray_settings():
                 self._open_settings()
