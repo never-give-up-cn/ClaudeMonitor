@@ -902,17 +902,15 @@ class ClaudeMonitorGUI:
                 self.tray_btn.config(text="托盘", bg="#3a3a5a")
             else:
                 # 最小化到托盘
-                def on_show():
-                    """Called from background thread (pystray). Schedule on main thread."""
-                    self.root.after(0, self._restore_from_tray)
-
-                def _restore_from_tray(self):
-                    """Restore window from tray (main thread only)."""
+                def _do_restore():
                     self.root.deiconify()
                     self.root.lift()
                     self._tray_active = False
                     self.tray_btn.config(text="托盘", bg="#3a3a5a")
                     remove_tray()
+
+                def on_show():
+                    self.root.after(0, _do_restore)
 
                 def on_quit():
                     remove_tray()
