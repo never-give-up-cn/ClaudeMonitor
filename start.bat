@@ -6,7 +6,7 @@ if "%MODE%"=="" set MODE=both
 
 cd /d "%~dp0"
 
-:: ===== 找 Python 3 =====
+:: ===== Find Python 3 =====
 set PY_CMD=
 
 :: 1) Windows Python Launcher
@@ -29,7 +29,7 @@ set PY_CMD_W=pythonw
 goto :found_py
 
 :try_python
-:: 3) python (必须是 3.x)
+:: 3) python (must be 3.x)
 python --version 2>&1 | find "Python 3" >nul
 if errorlevel 1 goto :no_py
 python -c "import sys; sys.exit(0 if sys.version_info >= (3,7) else 1)" >nul 2>&1
@@ -39,55 +39,50 @@ set PY_CMD_W=pythonw
 goto :found_py
 
 :no_py
-echo [ERROR] 需要 Python 3.7+，未找到。
-echo 请从 https://www.python.org/downloads/ 安装
+echo [ERROR] Python 3.7+ not found.
+echo Install from https://www.python.org/downloads/
 pause
 exit /b 1
 
 :found_py
-:: ===== 安装依赖 =====
+:: ===== Install deps =====
 %PY_CMD% -c "import serial, psutil" >nul 2>&1
 if errorlevel 1 (
-    echo [INFO] 正在安装依赖 (pyserial, psutil)...
+    echo [INFO] Installing pyserial, psutil...
     %PY_CMD% -m pip install pyserial psutil -q --trusted-host pypi.org --trusted-host files.pythonhosted.org 2>nul
     %PY_CMD% -c "import serial, psutil" >nul 2>&1
     if errorlevel 1 (
-        echo [INFO] 尝试使用国内镜像...
-        %PY_CMD% -m pip install pyserial psutil -q -i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn 2>nul
+        echo [INFO] Trying mirror...
+        %PY_CMD% -m pip install pyserial psutil -q -i https://pypi.tuna.tsinghua.edu.cn/simple 2>nul
     )
     %PY_CMD% -c "import serial, psutil" >nul 2>&1
     if errorlevel 1 (
-        echo [WARN] 依赖安装失败，部分功能可能不可用
-    ) else (
-        echo [OK] 依赖安装完成
+        echo [WARN] Deps install failed, some features may not work
     )
 )
 
-:: ===== 启动模式 =====
+:: ===== Launch mode =====
 
-:: Floating ball only
+:: Ball only
 if /i "%MODE%"=="ball" (
     title Claude Monitor - Ball
-    echo [INFO] 启动桌面悬浮球...
     start "" "%PY_CMD_W%" "%CD%\floating_ball.py"
-    goto :eof
+    exit /b 0
 )
 
 :: Console only
 if /i "%MODE%"=="console" (
     title Claude Monitor - Console
-    echo [INFO] 启动控制台监控...
     %PY_CMD% monitor.py
     pause
-    goto :eof
+    exit /b 0
 )
 
 :: GUI only (no console)
 if /i "%MODE%"=="gui" (
     title Claude Monitor - GUI
-    echo [INFO] 启动桌面窗口...
     start "" "%PY_CMD_W%" "%CD%\gui.py"
-    goto :eof
+    exit /b 0
 )
 
 :: Both: GUI + console (default)
@@ -102,10 +97,10 @@ if /i "%MODE%"=="both" (
     %PY_CMD% monitor.py
     echo.
     pause
-    goto :eof
+    exit /b 0
 )
 
-:: Desktop: floating ball + GUI background
+:: Desktop: ball + GUI
 if /i "%MODE%"=="desktop" (
     title Claude Monitor - Desktop
     echo ========================================
@@ -115,16 +110,15 @@ if /i "%MODE%"=="desktop" (
     start "" "%PY_CMD_W%" "%CD%\floating_ball.py"
     timeout /t 1 /nobreak >nul
     start "" "%PY_CMD_W%" "%CD%\gui.py"
-    echo [INFO] 悬浮球 + GUI 已在后台运行
-    echo 右键悬浮球可退出
+    echo [INFO] Floating ball + GUI running in background
     pause
-    goto :eof
+    exit /b 0
 )
 
 echo Usage: start.bat [ball^|console^|gui^|both^|desktop]
-echo   (default)  both     - GUI窗口 + 控制台
-echo   ball       - 仅桌面悬浮球（无窗口）
-echo   console    - 仅控制台监控
-echo   gui        - 仅GUI窗口（无控制台）
-echo   desktop    - 悬浮球 + GUI（无控制台）
+echo   (default)  both     - GUI + Console
+echo   ball       - Floating ball only (no window)
+echo   console    - Console monitor only
+echo   gui        - GUI only (no console)
+echo   desktop    - Ball + GUI (no console)
 pause
