@@ -79,6 +79,13 @@ try:
 except ImportError:
     HAS_TRAY = False
 
+try:
+    import pystray
+    from PIL import Image, ImageDraw
+    HAS_TRAY = True
+except ImportError:
+    HAS_TRAY = False
+
 
 # ============================================================
 # 配置
