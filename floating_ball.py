@@ -428,7 +428,7 @@ class FloatingBall:
         self.update_stats()
 
     def _ball_size(self):
-        return SIZE_2 if self.settings.get("style", 1) == 2 else SIZE_1
+        return 210 if self.settings.get("style", 1) == 2 else SIZE_1
 
     def _get_font(self, key, default=9):
         return ("Consolas", self.settings.get(key, default), "bold")
@@ -480,52 +480,111 @@ class FloatingBall:
         self._t("disk", self.canvas.create_text(size-4, 6, text="C:--%", fill="#a78bfa",
                                                  font=fs_disk, anchor=tk.NE))
 
+    def _draw_rounded_rect(self, x1, y1, x2, y2, r=18, fill="#0c1018", outline="#2a3050", width=1):
+        """Draw a rounded rectangle on canvas"""
+        self.canvas.create_arc(x1, y1, x1+2*r, y1+2*r, start=90, extent=90, fill=fill, outline="", width=0)
+        self.canvas.create_arc(x2-2*r, y1, x2, y1+2*r, start=0, extent=90, fill=fill, outline="", width=0)
+        self.canvas.create_arc(x1, y2-2*r, x1+2*r, y2, start=180, extent=90, fill=fill, outline="", width=0)
+        self.canvas.create_arc(x2-2*r, y2-2*r, x2, y2, start=270, extent=90, fill=fill, outline="", width=0)
+        self.canvas.create_rectangle(x1+r, y1, x2-r, y2, fill=fill, outline="", width=0)
+        self.canvas.create_rectangle(x1, y1+r, x2, y2-r, fill=fill, outline="", width=0)
+        # Outline
+        if outline and width > 0:
+            self.canvas.create_arc(x1, y1, x1+2*r, y1+2*r, start=90, extent=90, fill="", outline=outline, width=width)
+            self.canvas.create_arc(x2-2*r, y1, x2, y1+2*r, start=0, extent=90, fill="", outline=outline, width=width)
+            self.canvas.create_arc(x1, y2-2*r, x1+2*r, y2, start=180, extent=90, fill="", outline=outline, width=width)
+            self.canvas.create_arc(x2-2*r, y2-2*r, x2, y2, start=270, extent=90, fill="", outline=outline, width=width)
+            self.canvas.create_line(x1+r, y1, x2-r, y1, fill=outline, width=width)
+            self.canvas.create_line(x1+r, y2, x2-r, y2, fill=outline, width=width)
+            self.canvas.create_line(x1, y1+r, x1, y2-r, fill=outline, width=width)
+            self.canvas.create_line(x2, y1+r, x2, y2-r, fill=outline, width=width)
+
     def _draw_style2(self, size, cx, cy, s):
-        r = size // 2 - 2
-        self.canvas.create_oval(cx-r, cy-r, cx+r, cy+r, fill="#1a1a2e", outline="#3a3a5e", width=2)
-        # 内框线
-        self.canvas.create_rectangle(cx-60, cy-65, cx+60, cy+68, outline="#2a3a5e", width=1, fill="#16213e")
+        # Background: rounded rect with shadow effect
+        pad, rr = 14, 18
+        w, h = size - 2*pad, size - 2*pad
+        x1, y1 = pad, pad
+        x2, y2 = pad + w, pad + h
 
-        fs_big = ("Consolas", 8, "bold")
-        fs_sm = ("Consolas", 7)
-        fs_tiny = ("Consolas", 6)
+        # Outer shadow (offset darker rects)
+        for i in range(3, 0, -1):
+            a = 8 - i * 2
+            self._draw_rounded_rect(x1+i, y1+i+1, x2+i, y2+i+1, r=rr, fill="#00000000", outline=f"#0000000{a}", width=1)
 
-        # Token 行
-        self._t("toki", self.canvas.create_text(cx-55, cy-58, text="IN:--", fill="#88cc88",
-                                                 font=fs_big, anchor=tk.W))
-        self._t("toko", self.canvas.create_text(cx+5, cy-58, text="OUT:--", fill="#88cc88",
-                                                 font=fs_big, anchor=tk.W))
-        self._t("tokc", self.canvas.create_text(cx-55, cy-47, text="COST:--", fill="#fbbf24",
-                                                 font=fs_sm, anchor=tk.W))
-        # 分隔线
-        self.canvas.create_line(cx-55, cy-40, cx+55, cy-40, fill="#333333", width=1)
+        # Main background: semi-transparent dark
+        self._draw_rounded_rect(x1, y1, x2, y2, r=rr, fill="#0c1018c0", outline="#2a3050", width=1)
+        # Inner subtle glow
+        self._draw_rounded_rect(x1+2, y1+2, x2-2, y2-2, r=rr-2, fill="", outline="#1a2240", width=1)
 
-        # CPU MEM 同排
-        self._t("cpu", self.canvas.create_text(cx-55, cy-30, text="CPU:--%", fill="#4ade80",
-                                                font=fs_sm, anchor=tk.W))
-        self._t("mem", self.canvas.create_text(cx+5, cy-30, text="MEM:--%", fill="#60a5fa",
-                                                font=fs_sm, anchor=tk.W))
-        # 网速 GPU 同排
-        self._t("netu", self.canvas.create_text(cx-55, cy-16, text="▲--K", fill="#fbbf24",
-                                                 font=fs_sm, anchor=tk.W))
-        self._t("gpu", self.canvas.create_text(cx+5, cy-16, text="GPU:--%", fill="#f472b6",
-                                                font=fs_sm, anchor=tk.W))
-        # 网速下行
-        self._t("netd", self.canvas.create_text(cx-55, cy-4, text="▼--K", fill="#34d399",
-                                                 font=fs_sm, anchor=tk.W))
-        self._t("diskc", self.canvas.create_text(cx+5, cy-4, text="C:--%", fill="#a78bfa",
-                                                  font=fs_sm, anchor=tk.W))
+        # ===== Layout positions =====
+        L, R = x1 + 12, x1 + (w // 2) + 6  # left col, right col
+        W2 = (w // 2) - 14  # column width
 
-        # 分隔线
-        self.canvas.create_line(cx-55, cy+7, cx+55, cy+7, fill="#333333", width=1)
+        # Colors
+        c_label = "#D0D8E8"
+        c_val = "#4EE4F0"
+        c_cost = "#FFB359"
+        c_hw = "#66E29C"
+        c_disk = "#B49CFF"
+        c_up = "#FF7A7A"
+        c_dn = "#64A8FF"
+        c_msgs = "#888899"
+        c_div = "#ffffff18"
 
-        # 底部：Token 趋势/磁盘汇总
-        self._t("tokt", self.canvas.create_text(cx-55, cy+18, text="Total:--", fill="#88cc88",
-                                                 font=("Consolas", 7, "bold"), anchor=tk.W))
-        self._t("disc", self.canvas.create_text(cx-55, cy+32, text="DISK:--", fill="#a78bfa",
-                                                 font=fs_tiny, anchor=tk.W))
-        self._t("msg", self.canvas.create_text(cx-55, cy+44, text="--", fill="#666666",
-                                                font=fs_tiny, anchor=tk.W))
+        # Fonts
+        f_big = ("Consolas", 13, "bold")
+        f_med = ("Consolas", 11, "bold")
+        f_sm = ("Consolas", 10)
+        f_lbl = ("Consolas", 9)
+        f_tiny = ("Consolas", 8)
+
+        # ---- Module 1: Traffic & Cost ----
+        self._t("toki", self.canvas.create_text(L, y1+16, text="IN:--", fill=c_val, font=f_big, anchor=tk.W))
+        self._t("toko", self.canvas.create_text(L+W2, y1+16, text="OUT:--", fill=c_val, font=f_big, anchor=tk.W))
+        self._t("tokc", self.canvas.create_text(L, y1+37, text="COST:--", fill=c_cost, font=f_med, anchor=tk.W))
+        self._t("tokt", self.canvas.create_text(L+W2, y1+37, text="Total:--", fill=c_val, font=f_sm, anchor=tk.W))
+
+        # Divider 1
+        d1y = y1 + 55
+        self.canvas.create_line(L, d1y, x2-12, d1y, fill=c_div, width=1)
+
+        # ---- Module 2: Hardware ----
+        y2s = d1y + 10
+        self._t("cpu", self.canvas.create_text(L, y2s, text="CPU:--", fill=c_hw, font=f_med, anchor=tk.W))
+        self._t("mem", self.canvas.create_text(L+W2, y2s, text="MEM:--", fill=c_hw, font=f_med, anchor=tk.W))
+        # Progress bars
+        self._t("cpub", self.canvas.create_rectangle(L, y2s+14, L, y2s+16, fill=c_hw, outline=""))
+        self._t("memb", self.canvas.create_rectangle(L+W2, y2s+14, L+W2, y2s+16, fill=c_hw, outline=""))
+        self._items["cpub_pos"] = (L, y2s+14)
+        self._items["memb_pos"] = (L+W2, y2s+14)
+
+        y2s2 = y2s + 22
+        self._t("gpu", self.canvas.create_text(L, y2s2, text="GPU:--", fill=c_hw, font=f_sm, anchor=tk.W))
+        self._t("netu", self.canvas.create_text(L+W2, y2s2, text="▲--K", fill=c_up, font=f_sm, anchor=tk.W))
+        self._t("netd", self.canvas.create_text(L, y2s2+16, text="▼--K", fill=c_dn, font=f_sm, anchor=tk.W))
+        # Progress bar for GPU
+        self._t("gpub", self.canvas.create_rectangle(L, y2s2+14, L, y2s2+16, fill=c_hw, outline=""))
+        self._items["gpub_pos"] = (L, y2s2+14)
+
+        # Divider 2
+        d2y = y2s2 + 32
+        self.canvas.create_line(L, d2y, x2-12, d2y, fill=c_div, width=1)
+
+        # ---- Module 3: Disk ----
+        y3s = d2y + 10
+        self._t("diskl", self.canvas.create_text(L, y3s, text="DISK", fill=c_label, font=f_lbl, anchor=tk.W))
+        self._t("disc", self.canvas.create_text(L, y3s+14, text="C:-- | E:--", fill=c_disk, font=f_sm, anchor=tk.W))
+        # Progress bar for first disk
+        self._t("diskb", self.canvas.create_rectangle(L, y3s+26, L, y3s+28, fill=c_disk, outline=""))
+        self._items["diskb_pos"] = (L, y3s+26)
+
+        # Divider 3
+        d3y = y3s + 34
+        self.canvas.create_line(L, d3y, x2-12, d3y, fill=c_div, width=1)
+
+        # ---- Module 4: Footer ----
+        y4s = d3y + 6
+        self._t("msg", self.canvas.create_text(L, y4s+4, text="--", fill=c_msgs, font=f_tiny, anchor=tk.W))
 
     # ---- 工具 ----
 
@@ -802,45 +861,85 @@ class FloatingBall:
         parts = [f"{d['mount'][0]}:{d['percent']:.0f}%" for d in disks[:2]]
         self._st("disk", " ".join(parts) if parts else "--", "#a78bfa")
 
+    def _update_progress_bar(self, name, pct, color, x1, y, max_w=75):
+        """Update or create a 2px progress bar"""
+        w = max(2, int(max_w * min(pct, 100) / 100))
+        try:
+            item = self._items.get(name)
+            if item:
+                self.canvas.coords(item, x1, y, x1 + w, y + 2)
+                self.canvas.itemconfig(item, fill=color)
+        except Exception:
+            pass
+
     def _render_style2(self, data, tok):
         cpu = data.get("cpu", {}).get("percent", 0)
         mem = data.get("memory", {}).get("percent", 0)
         gpu_data = data.get("gpu")
-        gpu_str = self._gpu_str(gpu_data)
         gpu_v = self._gpu_val(gpu_data)
+        gpu_name = ""
+        gpu_str = "GPU:--"
+        if gpu_data and isinstance(gpu_data, list) and len(gpu_data) > 0:
+            gpu_v = gpu_data[0].get("util", 0)
+            gpu_str = f"GPU:{gpu_v:.0f}%"
+            gpu_name = gpu_data[0].get("name", "")
         net = data.get("network", {})
         up, dn = net.get("up_kbps", 0), net.get("down_kbps", 0)
         disks = data.get("disks", [])
 
-        # Token
+        # Colors
+        c_val = "#4EE4F0"
+        c_cost = "#FFB359"
+        c_hw = "#66E29C"
+        c_disk_c = "#B49CFF"
+        c_up = "#FF7A7A"
+        c_dn = "#64A8FF"
+
+        def warn(pct):
+            return "#FF4444" if pct > 80 else c_hw
+
+        # === Module 1: Traffic & Cost ===
         inp = tok.get("input", 0)
         out = tok.get("output", 0)
-        cost = tok.get("cost", 0)
+        cost = tok.get("cost", 0.0)
         total = tok.get("total", 0)
         msgs = tok.get("messages", 0)
-        self._st("toki", f"IN:{inp//1000}K" if inp >= 1000 else f"IN:{inp}", "#88cc88")
-        self._st("toko", f"OUT:{out//1000}K" if out >= 1000 else f"OUT:{out}", "#88cc88")
-        self._st("tokc", f"COST:${cost:.4f}" if cost else "COST:--", "#fbbf24")
-        self._st("tokt", f"Total:{total//1000}K" if total >= 1000 else f"Total:{total}", "#88cc88")
 
-        # 系统
-        self._st("cpu", f"CPU:{cpu:.0f}%", _load_color(cpu))
-        self._st("mem", f"MEM:{mem:.0f}%", _load_color(mem))
-        self._st("gpu", gpu_str, _load_color(gpu_v))
-        self._st("netu", f"▲{up:.0f}K" if up < 999 else f"▲{up/1024:.1f}M", "#fbbf24")
-        self._st("netd", f"▼{dn:.0f}K" if dn < 999 else f"▼{dn/1024:.1f}M", "#34d399")
+        self._st("toki", f"IN:{inp//1000}K" if inp >= 1000 else f"IN:{inp}", c_val)
+        self._st("toko", f"OUT:{out//1000}K" if out >= 1000 else f"OUT:{out}", c_val)
+        self._st("tokc", f"COST ${cost:.4f}" if cost else "COST --", c_cost)
+        self._st("tokt", f"Total {total//1000}K" if total >= 1000 else f"Total {total}", c_val)
 
-        # 磁盘
+        # === Module 2: Hardware ===
+        self._st("cpu", f"CPU {cpu:.0f}%", warn(cpu))
+        self._st("mem", f"MEM {mem:.0f}%", warn(mem))
+        self._st("gpu", gpu_str, warn(gpu_v) if gpu_v else "#555")
+        self._st("netu", f"▲{up:.0f}K" if up < 999 else f"▲{up/1024:.1f}M", c_up)
+        self._st("netd", f"▼{dn:.0f}K" if dn < 999 else f"▼{dn/1024:.1f}M", c_dn)
+
+        # Progress bars (max width 75px)
+        self._update_progress_bar("cpub", cpu, warn(cpu), self._items.get("cpu_pos", (0, 0, 75))[0], 0)
+        self._update_progress_bar("memb", mem, warn(mem), self._items.get("mem_pos", (0, 0, 75))[0], 0)
+        self._update_progress_bar("gpub", gpu_v, warn(gpu_v) if gpu_v else "#555", self._items.get("gpu_pos", (0, 0, 75))[0], 0)
+
+        # === Module 3: Disk ===
         c_disk = next((d for d in disks if d["mount"] == "C:\\"), None)
         e_disk = next((d for d in disks if d["mount"] == "E:\\"), None)
+        c_pct = c_disk["percent"] if c_disk else 0
+        e_pct = e_disk["percent"] if e_disk else 0
+        c_warn = "#FF4444" if c_pct > 80 else c_disk_c
+        e_warn = "#FF4444" if e_pct > 80 else c_disk_c
         disk_str = ""
         if c_disk:
-            disk_str += f"C:{c_disk['percent']:.0f}%"
+            disk_str += f"C:{c_pct:.0f}%"
         if e_disk:
-            disk_str += f" E:{e_disk['percent']:.0f}%"
-        self._st("diskc", f"C:{c_disk['percent']:.0f}%" if c_disk else "C:--", "#a78bfa")
-        self._st("disc", f"DISK: {disk_str}" if disk_str else "DISK:--", "#a78bfa")
-        self._st("msg", f"msgs:{msgs}" if msgs else "", "#666666")
+            disk_str += f" | E:{e_pct:.0f}%"
+        self._st("disc", disk_str if disk_str else "--", c_disk_c)
+        # Update progress bar for C: drive
+        self._update_progress_bar("diskb", c_pct, c_warn, self._items.get("disk_pos", (0, 0, 75))[0], 0)
+
+        # === Module 4: Footer ===
+        self._st("msg", f"msgs:{msgs}" if msgs else "", "#888899")
 
     def _gpu_str(self, gpu):
         if gpu and isinstance(gpu, list) and len(gpu) > 0:
