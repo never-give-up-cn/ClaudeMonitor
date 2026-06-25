@@ -422,7 +422,13 @@ class StateDetector:
 
         # 2. 子进程运行中
         if children:
-            child_str = " ".join((c.name() or "").lower() for c in children)
+            child_names = []
+            for c in children:
+                try:
+                    child_names.append((c.name() or "").lower())
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+            child_str = " ".join(child_names)
             if any(t in child_str for t in
                    ["npm", "node", "webpack", "tsc", "babel",
                     "vite", "rollup", "esbuild", "ng", "vue"]):
