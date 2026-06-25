@@ -6,40 +6,39 @@ if "%MODE%"=="" set MODE=gui
 
 cd /d "%~dp0"
 
-:: check python3
+:: find python
+set PY_CMD=python
 where python3 >nul 2>&1
+if %errorlevel% equ 0 set PY_CMD=python3
+
+where %PY_CMD% >nul 2>&1
 if %errorlevel% neq 0 (
-    where python >nul 2>&1
-    if %errorlevel% neq 0 (
-        echo [ERROR] Python not found. Please install Python 3.7+
-        pause
-        exit /b 1
-    )
-    set PYTHON=python
-) else (
-    set PYTHON=python3
+    echo [ERROR] Python not found. Install Python 3.7+
+    pause
+    exit /b 1
 )
 
 :: install deps
-%PYTHON% -c "import serial, psutil" >nul 2>&1
+%PY_CMD% -c "import serial, psutil" >nul 2>&1
 if %errorlevel% neq 0 (
     echo [INFO] Installing dependencies...
-    %PYTHON% -m pip install pyserial psutil -q
+    %PY_CMD% -m pip install pyserial psutil -q
 )
 
 if /i "%MODE%"=="console" (
     title Claude Monitor - Console
     echo ========================================
-    echo   Claude Code Status Monitor (Console)
+    echo   Claude Code Monitor (Console)
     echo ========================================
     echo.
-    %PYTHON% monitor.py
+    %PY_CMD% monitor.py
     pause
 ) else (
-    title Claude Monitor - Desktop
+    title Claude Monitor
     echo ========================================
-    echo   Claude Code Status Monitor (Desktop)
+    echo   Claude Code Monitor (Desktop)
     echo ========================================
     echo.
-    start /b pythonw gui.py 2>nul || %PYTHON% gui.py
+    echo [INFO] Launching status window...
+    start "" %PY_CMD% gui.py
 )
