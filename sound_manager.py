@@ -3,11 +3,9 @@
 """
 声音管理
 ========
-Windows 提示音播放，任务完成和用户操作时发出不同音效。
-纯 winsound 实现，无额外依赖。
+Windows 提示音，使用 Beep() 产生纯音，无需系统音效支持。
 """
 
-import sys
 import threading
 import time
 
@@ -18,49 +16,63 @@ except ImportError:
     HAS_WINSOUND = False
 
 # 声音类型
-SOUND_DONE = "done"        # 任务完成
-SOUND_ACTION = "action"    # 需要用户操作
-SOUND_ERROR = "error"      # 错误
-SOUND_NOTIFY = "notify"    # 普通通知
+SOUND_DONE = "done"
+SOUND_ACTION = "action"
+SOUND_ERROR = "error"
+SOUND_NOTIFY = "notify"
 
-# 默认启用声音
+# 默认启用
 ENABLED = True
 
 
+def _beep(freq, duration):
+    """播放指定频率和时长的声音"""
+    if not HAS_WINSOUND or not ENABLED:
+        return
+    try:
+        winsound.Beep(freq, duration)
+    except Exception:
+        pass
+
+
 def play(sound_type=SOUND_NOTIFY):
-    """播放指定类型的提示音"""
+    """播放提示音"""
     if not ENABLED or not HAS_WINSOUND:
         return
 
     try:
         if sound_type == SOUND_DONE:
-            # 任务完成：两声短促提示
-            winsound.MessageBeep(winsound.MB_ICONASTERISK)
-            threading.Thread(target=lambda: (time.sleep(0.15), winsound.MessageBeep(winsound.MB_OK)),
-                             daemon=True).start()
+            # 任务完成：两声轻快上升音 (880Hz + 1320Hz)
+            threading.Thread(target=lambda: (
+                _beep(880, 120),
+                time.sleep(0.12),
+                _beep(1320, 180),
+            ), daemon=True).start()
 
         elif sound_type == SOUND_ACTION:
-            # 需要用户操作：重复两声
-            winsound.MessageBeep(winsound.MB_ICONEXCLAMATION)
-            threading.Thread(target=lambda: (time.sleep(0.2), winsound.MessageBeep(winsound.MB_ICONEXCLAMATION)),
-                             daemon=True).start()
+            # 需要操作：两声短促警告音 (660Hz 重复)
+            threading.Thread(target=lambda: (
+                _beep(660, 100),
+                time.sleep(0.15),
+                _beep(660, 100),
+            ), daemon=True).start()
 
         elif sound_type == SOUND_ERROR:
             # 错误：低沉长音
-            winsound.MessageBeep(winsound.MB_ICONHAND)
+            _beep(330, 400)
 
         elif sound_type == SOUND_NOTIFY:
-            # 普通通知：一声短促
-            winsound.MessageBeep(winsound.MB_OK)
+            # 通知：一声短促
+            _beep(880, 80)
 
     except Exception:
         pass
 
 
 if __name__ == "__main__":
+    ENABLED = True
     print("测试提示音...")
-    play(SOUND_DONE)
-    time.sleep(0.5)
-    play(SOUND_ACTION)
-    time.sleep(0.5)
-    play(SOUND_NOTIFY)
+    for name in [SOUND_DONE, SOUND_ACTION, SOUND_NOTIFY, SOUND_ERROR]:
+        print(f"  {name}...")
+        play(name)
+        time.sleep(0.6)
