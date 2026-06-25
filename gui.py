@@ -692,7 +692,12 @@ class ClaudeMonitorGUI:
         self._is_pinned = not self._is_pinned
         self.root.attributes("-topmost", self._is_pinned)
 
+    def toggle_pin(self):
+        self._is_pinned = not self._is_pinned
+        self.root.attributes("-topmost", self._is_pinned)
+
     def _toggle_minimize(self):
+
         self.root.iconify()
 
     def _minimize_to_tray(self):
