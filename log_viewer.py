@@ -153,24 +153,22 @@ class LogViewer:
                   foreground=[("selected", "#ffffff")])
 
         # 列定义
-        columns = ("id", "timestamp", "model", "user_input",
-                   "input_tokens", "output_tokens", "cache_read", "cache_create",
-                   "total_tokens", "cost")
+        columns = ("id", "timestamp", "model", "user_input", "assistant_output",
+                   "input_tokens", "output_tokens", "total_tokens", "cost")
         self.tree = ttk.Treeview(table_frame, columns=columns, show="headings",
                                  selectmode="browse")
 
         # 列头
         col_configs = [
-            ("id", "ID", 40, tk.CENTER),
-            ("timestamp", "时间", 150, tk.CENTER),
-            ("model", "模型", 110, tk.CENTER),
-            ("user_input", "用户输入", 380, tk.W),
-            ("input_tokens", "输入Token", 85, tk.CENTER),
-            ("output_tokens", "输出Token", 85, tk.CENTER),
-            ("cache_read", "缓存读", 80, tk.CENTER),
-            ("cache_create", "缓存创建", 80, tk.CENTER),
-            ("total_tokens", "合计Token", 90, tk.CENTER),
-            ("cost", "费用$", 80, tk.CENTER),
+            ("id", "ID", 36, tk.CENTER),
+            ("timestamp", "时间", 140, tk.CENTER),
+            ("model", "模型", 100, tk.CENTER),
+            ("user_input", "用户输入", 260, tk.W),
+            ("assistant_output", "AI 返回", 260, tk.W),
+            ("input_tokens", "输入T", 65, tk.CENTER),
+            ("output_tokens", "输出T", 65, tk.CENTER),
+            ("total_tokens", "合计T", 70, tk.CENTER),
+            ("cost", "费用$", 72, tk.CENTER),
         ]
         for col, text, width, anchor in col_configs:
             self.tree.heading(col, text=text)
@@ -304,15 +302,18 @@ class LogViewer:
 
         if not records:
             self.tree.insert("", tk.END, values=(
-                "--", "--", "--", "没有匹配的日志记录", "--", "--", "--", "--", "--", "--"
+                "--", "--", "--", "没有匹配的日志记录", "--", "--", "--", "--", "--"
             ))
             return
 
         for r in records:
             user_input = (r.get("user_input") or "")
-            # 截断过长的输入
-            if len(user_input) > 80:
-                user_input = user_input[:77] + "..."
+            if len(user_input) > 50:
+                user_input = user_input[:47] + "..."
+
+            ai_output = (r.get("assistant_output") or "")
+            if len(ai_output) > 50:
+                ai_output = ai_output[:47] + "..."
 
             cost = r.get("cost", 0)
 
@@ -321,10 +322,9 @@ class LogViewer:
                 r.get("timestamp", ""),
                 self._short_model(r.get("model", "")),
                 user_input,
+                ai_output,
                 self._fmt_num(r.get("input_tokens", 0)),
                 self._fmt_num(r.get("output_tokens", 0)),
-                self._fmt_num(r.get("cache_read_tokens", 0)),
-                self._fmt_num(r.get("cache_create_tokens", 0)),
                 self._fmt_num(r.get("total_tokens", 0)),
                 f"{cost:.6f}" if isinstance(cost, (int, float)) else str(cost),
             ))
@@ -409,68 +409,100 @@ class LogViewer:
         if not values or values[0] == "--":
             return
 
+        record_id = int(values[0])
+
         # 弹出详情窗口
         detail = tk.Toplevel(self.win)
-        detail.title(f"日志详情 #{values[0]}")
-        detail.geometry("640x400")
+        detail.title(f"日志详情 #{record_id}")
+        detail.geometry("680x560")
         detail.configure(bg="#1e1e1e")
+
+        # 从日志文件读取完整记录
+        record = self._get_full_record(record_id)
+        if not record:
+            record = {}
 
         frame = tk.Frame(detail, bg="#1e1e1e", padx=20, pady=16)
         frame.pack(fill=tk.BOTH, expand=True)
 
+        # -- 基本信息 --
+        info_frame = tk.Frame(frame, bg="#1e1e1e")
+        info_frame.pack(fill=tk.X)
+
         fields = [
-            ("ID", values[0]),
-            ("时间", values[1]),
-            ("模型", values[2]),
-            ("用户输入", values[3]),
-            ("输入 Token", values[4]),
-            ("输出 Token", values[5]),
-            ("缓存读取", values[6]),
-            ("缓存创建", values[7]),
-            ("合计 Token", values[8]),
-            ("费用 ($)", values[9]),
+            ("ID", str(record.get("id", values[0]))),
+            ("时间", record.get("timestamp", values[1])),
+            ("模型", record.get("model", values[2])),
+            ("输入 Token", self._fmt_num(record.get("input_tokens", values[4]))),
+            ("输出 Token", self._fmt_num(record.get("output_tokens", values[5]))),
+            ("费用 ($)", f"{record.get('cost', 0):.6f}" if isinstance(record.get('cost'), (int, float)) else values[8]),
         ]
 
-        for i, (label, val) in enumerate(fields):
-            row = tk.Frame(frame, bg="#1e1e1e")
-            row.pack(fill=tk.X, pady=2)
+        for label, val in fields:
+            row = tk.Frame(info_frame, bg="#1e1e1e")
+            row.pack(fill=tk.X, pady=1)
             tk.Label(row, text=label + ":", font=FONT_BOLD,
-                     fg="#88aacc", bg="#1e1e1e", width=12, anchor=tk.W).pack(side=tk.LEFT)
-            tk.Label(row, text=val, font=FONT_EN if i < 9 else FONT,
-                     fg="#dddddd", bg="#1e1e1e", wraplength=460, anchor=tk.W).pack(side=tk.LEFT, fill=tk.X, expand=True)
+                     fg="#88aacc", bg="#1e1e1e", width=10, anchor=tk.W).pack(side=tk.LEFT)
+            tk.Label(row, text=val, font=FONT_EN,
+                     fg="#dddddd", bg="#1e1e1e", anchor=tk.W).pack(side=tk.LEFT)
 
-        # 用户输入全文
-        row = tk.Frame(frame, bg="#1e1e1e")
-        row.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
-        tk.Label(row, text="用户输入全文:", font=FONT_BOLD,
-                 fg="#88aacc", bg="#1e1e1e", anchor=tk.W).pack(anchor=tk.NW)
+        # -- Notebook: 用户输入 / AI 输出 / 思考过程 --
+        sep = tk.Frame(frame, height=1, bg="#333333")
+        sep.pack(fill=tk.X, pady=(10, 6))
 
-        text_frame = tk.Frame(row, bg="#2d2d2d")
-        text_frame.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
+        note = ttk.Notebook(frame)
+        note.pack(fill=tk.BOTH, expand=True)
 
-        text_widget = tk.Text(text_frame, font=FONT_EN_SM, bg="#2d2d2d", fg="#cccccc",
-                              relief=tk.FLAT, wrap=tk.WORD, padx=8, pady=6)
-        text_widget.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
+        style = ttk.Style()
+        style.configure("TNotebook", background="#252525", borderwidth=0)
+        style.configure("TNotebook.Tab", background="#3a3a3a", foreground="#cccccc",
+                        padding=[10, 2], font=FONT_SMALL)
+        style.map("TNotebook.Tab", background=[("selected", "#2a5a5a")],
+                  foreground=[("selected", "#ffffff")])
 
-        scroll = ttk.Scrollbar(text_frame, orient=tk.VERTICAL, command=text_widget.yview)
-        text_widget.configure(yscrollcommand=scroll.set)
-        scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        # 用户输入 Tab
+        user_tab = self._make_text_tab(note, record.get("user_input", ""),
+                                       "用户输入", "#1e2a1e")
+        note.add(user_tab, text="  用户输入  ")
 
-        # 从日志文件读取完整用户输入
-        full_text = self._get_full_user_input(int(values[0]))
-        text_widget.insert("1.0", full_text)
-        text_widget.config(state=tk.DISABLED)
+        # AI 输出 Tab
+        ai_tab = self._make_text_tab(note, record.get("assistant_output", ""),
+                                      "AI 返回", "#1e1e2a")
+        note.add(ai_tab, text="  AI 返回  ")
 
+        # 思考过程 Tab
+        thinking_tab = self._make_text_tab(note, record.get("assistant_thinking", ""),
+                                            "思考过程", "#2a1e1e")
+        note.add(thinking_tab, text="  思考过程  ")
+
+        # -- 关闭按钮 --
         btn_frame = tk.Frame(detail, bg="#1e1e1e", pady=10)
         btn_frame.pack(fill=tk.X)
         tk.Button(btn_frame, text="关闭", command=detail.destroy,
                   font=FONT_SMALL, bg="#5a1a1a", fg="#cccccc",
                   relief=tk.FLAT, padx=20, pady=2, cursor="hand2").pack()
 
-    def _get_full_user_input(self, record_id):
-        """从日志文件中读取指定记录的完整用户输入"""
+    def _make_text_tab(self, parent, content, label, bg_color):
+        """创建一个带滚动文本的 Tab 页"""
+        tab = tk.Frame(parent, bg=bg_color, padx=8, pady=8)
+
+        text_widget = tk.Text(tab, font=FONT_EN_SM, bg=bg_color, fg="#cccccc",
+                              relief=tk.FLAT, wrap=tk.WORD, padx=8, pady=6)
+        text_widget.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
+
+        scroll = ttk.Scrollbar(tab, orient=tk.VERTICAL, command=text_widget.yview)
+        text_widget.configure(yscrollcommand=scroll.set)
+        scroll.pack(side=tk.RIGHT, fill=tk.Y)
+
+        display_text = content or "(无内容)"
+        text_widget.insert("1.0", display_text)
+        text_widget.config(state=tk.DISABLED)
+        return tab
+
+    def _get_full_record(self, record_id):
+        """从日志文件中读取指定 ID 的完整记录"""
         if not self.logger or not self.logger.log_file.exists():
-            return ""
+            return None
 
         try:
             with open(self.logger.log_file, "r", encoding="utf-8") as f:
@@ -481,12 +513,12 @@ class LogViewer:
                     try:
                         record = json.loads(line)
                         if record.get("id") == record_id:
-                            return record.get("user_input", "")
+                            return record
                     except json.JSONDecodeError:
                         continue
         except Exception:
             pass
-        return ""
+        return None
 
     def _show_empty(self, msg):
         """显示空状态"""

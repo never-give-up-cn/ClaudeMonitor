@@ -74,7 +74,10 @@ class ConversationLogger:
         self._last_file = None
         self._last_pos = 0
         self._last_turn_id = 0
-        self._pending_user = None  # 缓存当前用户输入，等对应 assistant 匹配
+        self._pending_user = None   # 缓存当前用户输入
+        self._pending_output = {"text": "", "thinking": ""}  # 缓存 assistant 输出
+        self._pending_usage = None  # 缓存当前 turn 的 usage 数据
+        self._pending_model = ""    # 缓存当前 turn 的模型名
 
         # 初始化时读取已有日志的最大 ID
         self._load_last_id()
@@ -107,9 +110,12 @@ class ConversationLogger:
             return
 
         if latest != self._last_file:
+            self._flush_pending()
             self._last_file = latest
             self._last_pos = 0
             self._pending_user = None
+            self._pending_output = {"text": "", "thinking": ""}
+            self._pending_usage = None
 
         self._parse_file(latest)
 
@@ -136,12 +142,41 @@ class ConversationLogger:
         except (FileNotFoundError, PermissionError, OSError):
             pass
 
+    def _process_line(self, data):
+        """处理一行会话数据"""
+        tp = data.get("type")
+        msg = data.get("message", {})
+
+        if tp == "user":
+            # 有实际文本 → 新的一轮开始，先保存上一轮
+            user_text = self._extract_user_text(msg)
+            if user_text:
+                self._flush_pending()
+                self._pending_user = {
+                    "timestamp": data.get("timestamp", ""),
+                    "user_input": user_text,
+                }
+                self._pending_output = {"text": "", "thinking": ""}
+                self._pending_usage = None
+                self._pending_model = ""
+            # 无文本（tool_result 反馈）→ 跳过
+
+        elif tp == "assistant":
+            # 累积输出内容
+            self._accumulate_output(msg)
+
+            usage = msg.get("usage", {})
+            if usage and usage.get("input_tokens") and self._pending_user:
+                if not self._pending_usage:
+                    self._pending_usage = usage
+                    self._pending_model = msg.get("model", "unknown")
+
     def _extract_user_text(self, msg):
         """提取用户实际输入文本，跳过 tool_result 等非用户内容"""
         content = msg.get("content", "")
         if isinstance(content, str):
             text = content.strip()
-            return text[:500] if text else ""
+            return text[:1000] if text else ""
         if isinstance(content, list):
             texts = []
             for block in content:
@@ -150,55 +185,69 @@ class ConversationLogger:
                     if t:
                         texts.append(t)
             combined = " ".join(texts)
-            return combined[:500] if combined else ""
+            return combined[:1000] if combined else ""
         return ""
 
-    def _process_line(self, data):
-        """处理一行会话数据"""
-        tp = data.get("type")
-        msg = data.get("message", {})
+    def _accumulate_output(self, msg):
+        """累积 assistant 输出的文本和思考内容"""
+        content = msg.get("content", [])
+        if not isinstance(content, list):
+            return
+        for block in content:
+            ct = block.get("type", "")
+            if ct == "text":
+                txt = block.get("text", "")
+                if txt:
+                    self._pending_output["text"] += txt
+            elif ct == "thinking":
+                txt = block.get("thinking", "")
+                if txt:
+                    self._pending_output["thinking"] += txt
 
-        if tp == "user":
-            # 只记录有实际文本的用户输入（跳过 tool_result 反馈）
-            user_text = self._extract_user_text(msg)
-            if not user_text:
-                return
+    def _flush_pending(self):
+        """将上一轮的待写入记录保存到日志"""
+        if not self._pending_user or not self._pending_usage:
+            return
 
-            self._pending_user = {
-                "timestamp": data.get("timestamp", ""),
-                "user_input": user_text,
-            }
+        usage = self._pending_usage
+        model = self._pending_model or "unknown"
+        ts = self._pending_user["timestamp"]
+        cost = calculate_cost(usage, model)
 
-        elif tp == "assistant":
-            usage = msg.get("usage", {})
-            if not usage or not usage.get("input_tokens"):
-                return  # 无 token 数据的跳过
+        # 截断输出文本（最多 5000 字符）
+        output_text = self._pending_output.get("text", "").strip()
+        output_thinking = self._pending_output.get("thinking", "").strip()
+        if len(output_text) > 5000:
+            output_text = output_text[:5000] + "\n\n[... 已截断 ...]"
+        if len(output_thinking) > 3000:
+            output_thinking = output_thinking[:3000] + "\n\n[... 已截断 ...]"
 
-            # 如果还没记录过这个 turn，且有缓存的用户输入
-            if self._pending_user:
-                model = msg.get("model", "unknown")
-                ts = self._pending_user["timestamp"]
-                cost = calculate_cost(usage, model)
+        self._last_turn_id += 1
+        record = {
+            "id": self._last_turn_id,
+            "timestamp": self._normalize_ts(ts),
+            "user_input": self._pending_user["user_input"][:1000],
+            "assistant_output": output_text,
+            "assistant_thinking": output_thinking,
+            "model": model,
+            "input_tokens": usage.get("input_tokens", 0),
+            "output_tokens": usage.get("output_tokens", 0),
+            "cache_read_tokens": usage.get("cache_read_input_tokens", 0),
+            "cache_create_tokens": usage.get("cache_creation_input_tokens", 0),
+            "total_tokens": (usage.get("input_tokens", 0)
+                             + usage.get("output_tokens", 0)
+                             + usage.get("cache_read_input_tokens", 0)
+                             + usage.get("cache_creation_input_tokens", 0)),
+            "cost": round(cost, 6),
+            "session_id": "",  # 从消息中提取 sessionId 稍复杂，不影响主要功能
+        }
+        self._write_record(record)
 
-                self._last_turn_id += 1
-                record = {
-                    "id": self._last_turn_id,
-                    "timestamp": self._normalize_ts(ts),
-                    "user_input": self._pending_user["user_input"][:500],
-                    "model": model,
-                    "input_tokens": usage.get("input_tokens", 0),
-                    "output_tokens": usage.get("output_tokens", 0),
-                    "cache_read_tokens": usage.get("cache_read_input_tokens", 0),
-                    "cache_create_tokens": usage.get("cache_creation_input_tokens", 0),
-                    "total_tokens": (usage.get("input_tokens", 0)
-                                     + usage.get("output_tokens", 0)
-                                     + usage.get("cache_read_input_tokens", 0)
-                                     + usage.get("cache_creation_input_tokens", 0)),
-                    "cost": round(cost, 6),
-                    "session_id": data.get("sessionId", ""),
-                }
-                self._write_record(record)
-                self._pending_user = None  # 已配对
+        # 清空待写入状态
+        self._pending_user = None
+        self._pending_output = {"text": "", "thinking": ""}
+        self._pending_usage = None
+        self._pending_model = ""
 
     def _normalize_ts(self, ts_str):
         """标准化时间戳格式"""
@@ -282,8 +331,13 @@ class ConversationLogger:
         if keyword:
             kw = keyword.lower()
             user_input = (record.get("user_input") or "").lower()
+            assistant_out = (record.get("assistant_output") or "").lower()
+            assistant_think = (record.get("assistant_thinking") or "").lower()
             model = (record.get("model") or "").lower()
-            if kw not in user_input and kw not in model and kw not in str(record.get("id", "")):
+            rid = str(record.get("id", ""))
+            if (kw not in user_input and kw not in assistant_out
+                    and kw not in assistant_think and kw not in model
+                    and kw not in rid):
                 return False
 
         return True
@@ -322,7 +376,12 @@ class ConversationLogger:
             "cost": round(total_cost, 4),
         }
 
+    def flush(self):
+        """手动刷新待写入的记录（会话结束或停止前调用）"""
+        self._flush_pending()
+
     def stop(self):
+        self.flush()
         self._running = False
 
 
