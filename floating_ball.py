@@ -506,15 +506,13 @@ class FloatingBall:
         x1, y1 = pad, pad
         x2, y2 = pad + w, pad + h
 
-        # Outer shadow (offset darker rects)
-        for i in range(3, 0, -1):
-            a = 8 - i * 2
-            self._draw_rounded_rect(x1+i, y1+i+1, x2+i, y2+i+1, r=rr, fill="#00000000", outline=f"#0000000{a}", width=1)
+        # Shadow effect (offset rectangles)
+        self._draw_rounded_rect(x1+2, y1+3, x2+2, y2+3, r=rr, fill="#080a10", outline="", width=0)
 
-        # Main background: semi-transparent dark
-        self._draw_rounded_rect(x1, y1, x2, y2, r=rr, fill="#0c1018c0", outline="#2a3050", width=1)
-        # Inner subtle glow
-        self._draw_rounded_rect(x1+2, y1+2, x2-2, y2-2, r=rr-2, fill="", outline="#1a2240", width=1)
+        # Main background: dark rounded rect
+        self._draw_rounded_rect(x1, y1, x2, y2, r=rr, fill="#0c1018", outline="#2a3050", width=1)
+        # Inner subtle border
+        self._draw_rounded_rect(x1+1, y1+1, x2-1, y2-1, r=rr-1, fill="", outline="#1a2235", width=1)
 
         # ===== Layout positions =====
         L, R = x1 + 12, x1 + (w // 2) + 6  # left col, right col
@@ -529,7 +527,7 @@ class FloatingBall:
         c_up = "#FF7A7A"
         c_dn = "#64A8FF"
         c_msgs = "#888899"
-        c_div = "#ffffff18"
+        c_div = "#334455"
 
         # Fonts
         f_big = ("Consolas", 13, "bold")
