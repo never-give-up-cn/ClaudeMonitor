@@ -38,6 +38,12 @@ except ImportError:
     print("需要 system_stats.py")
     sys.exit(1)
 
+try:
+    from single_instance import SingleInstance
+    SINGLE_OK = True
+except ImportError:
+    SINGLE_OK = False
+
 # ============================================================
 # 配置
 # ============================================================
@@ -70,6 +76,19 @@ class FloatingBall:
     """桌面悬浮球"""
 
     def __init__(self):
+        # 单例检测
+        if SINGLE_OK:
+            self._instance = SingleInstance("floating_ball")
+            if not self._instance.acquire():
+                # 已有实例，让它显示
+                self._instance.bring_to_front()
+                sys.exit(0)
+            self._instance.cleanup_on_exit()
+            # 启动 IPC 服务，接收 "show" 消息
+            self._instance.start_server(on_message=self._on_ipc_message)
+        else:
+            self._instance = None
+
         self.stats = SystemStats()
         self._running = True
         self._drag_start = None  # (x, y) 拖拽起点
@@ -205,10 +224,31 @@ class FloatingBall:
             self._on_click()
         self._drag_start = None
 
+    def _on_ipc_message(self, msg):
+        """收到 IPC 消息：显示窗口"""
+        if msg == "show":
+            self.root.deiconify()
+            self.root.lift()
+            self.root.focus_force()
+            if self._hidden_mode:
+                self._slide_out()
+
     def _on_click(self):
         """左键点击：打开主 GUI"""
         if self._hidden_mode:
             return
+
+        # 先尝试让已有 GUI 显示
+        if SINGLE_OK:
+            try:
+                gui_inst = SingleInstance("gui")
+                if gui_inst.is_running():
+                    gui_inst.bring_to_front()
+                    return
+            except Exception:
+                pass
+
+        # 没有运行中的 GUI，启动新实例
         gui_path = Path(__file__).parent / "gui.py"
         if gui_path.exists():
             try:
@@ -405,6 +445,8 @@ class FloatingBall:
     def on_exit(self):
         """退出"""
         self._running = False
+        if self._instance:
+            self._instance.stop()
         self.root.destroy()
 
 

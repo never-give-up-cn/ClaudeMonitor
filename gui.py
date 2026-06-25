@@ -66,6 +66,12 @@ try:
 except ImportError:
     HAS_WINSOUND = False
 
+try:
+    from single_instance import SingleInstance
+    SINGLE_OK = True
+except ImportError:
+    SINGLE_OK = False
+
 
 # ============================================================
 # 配置
@@ -370,6 +376,17 @@ FONT_EN_SM = ("Consolas", 9)
 
 class ClaudeMonitorGUI:
     def __init__(self):
+        # 单例检测
+        if SINGLE_OK:
+            self._instance = SingleInstance("gui")
+            if not self._instance.acquire():
+                self._instance.bring_to_front()
+                sys.exit(0)
+            self._instance.cleanup_on_exit()
+            self._instance.start_server(on_message=self._on_ipc_message)
+        else:
+            self._instance = None
+
         self.root = tk.Tk()
         self.root.title("Claude Code 状态监控")
         self.root.overrideredirect(False)
@@ -762,6 +779,13 @@ class ClaudeMonitorGUI:
             import tkinter.messagebox as mb
             mb.showerror("错误", f"托盘设置失败:\n{e}")
 
+    def _on_ipc_message(self, msg):
+        """收到 IPC 消息：显示窗口到前台"""
+        if msg == "show":
+            self.root.deiconify()
+            self.root.lift()
+            self.root.focus_force()
+
     def _log_action(self, action):
         """记录用户操作到对话日志"""
         if not self.conversation_logger:
@@ -803,7 +827,8 @@ class ClaudeMonitorGUI:
             self.token_tracker.stop()
         if self.conversation_logger:
             self.conversation_logger.stop()
-        # 退出前记录
+        if self._instance:
+            self._instance.stop()
         try:
             self._log_action("退出监控")
         except Exception:
