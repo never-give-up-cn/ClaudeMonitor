@@ -42,6 +42,13 @@ try:
 except ImportError:
     HAS_WINSOUND = False
 
+try:
+    import pystray
+    from PIL import Image, ImageDraw
+    HAS_TRAY = True
+except ImportError:
+    HAS_TRAY = False
+
 # ===== 路径 =====
 SCRIPT_DIR = Path(__file__).parent
 SETTINGS_FILE = SCRIPT_DIR / "ball_settings.json"
@@ -400,6 +407,7 @@ class FloatingBall:
         self._hidden_mode = False
         self._leave_timer = None
         self._tok_data = ""
+        self._tray_icon = None
 
         self.root = tk.Tk()
         self.root.title("系统监控")
@@ -425,6 +433,7 @@ class FloatingBall:
         self._stats_thread_running = True
         self._stats_thread()
         self.root.geometry(f"+{self.sw-self.bs-20}+{self.sh-self.bs-60}")
+        self._setup_tray()  # 系统托盘
         self.update_stats()
 
     def _ball_size(self):
@@ -952,9 +961,65 @@ class FloatingBall:
             return gpu[0].get("util", 0)
         return 0
 
+    def _setup_tray(self):
+        """创建系统托盘图标（右下角）"""
+        if not HAS_TRAY:
+            return
+        try:
+            # 创建 16x16 图标
+            img = Image.new("RGBA", (16, 16), (0, 0, 0, 0))
+            draw = ImageDraw.Draw(img)
+            draw.ellipse([1, 1, 14, 14], fill=(74, 158, 255, 220), outline=(100, 180, 255, 255))
+            draw.ellipse([4, 4, 11, 11], fill=(255, 255, 255, 200))
+
+            # 构建菜单（与浮窗右键菜单同步）
+            def tray_show():
+                self.root.deiconify()
+                self.root.lift()
+                self.root.focus_force()
+                if self._hidden_mode:
+                    self._slide_out()
+
+            def tray_settings():
+                self._open_settings()
+
+            def tray_style1():
+                self.root.after(0, lambda: self._switch_style(1))
+
+            def tray_style2():
+                self.root.after(0, lambda: self._switch_style(2))
+
+            def tray_quit():
+                self.root.after(0, self.on_exit)
+
+            menu = pystray.Menu(
+                pystray.MenuItem("打开主窗口", tray_show, default=True),
+                pystray.MenuItem("设置", tray_settings),
+                pystray.Menu.SEPARATOR,
+                pystray.MenuItem("简约圆形", tray_style1),
+                pystray.MenuItem("Token 面板", tray_style2),
+                pystray.Menu.SEPARATOR,
+                pystray.MenuItem("退出", tray_quit),
+            )
+
+            self._tray_icon = pystray.Icon("claude_monitor", img, "Claude 监控", menu)
+
+            # 在后台线程运行托盘
+            import threading
+            t = threading.Thread(target=self._tray_icon.run, daemon=True)
+            t.start()
+        except Exception as e:
+            print(f"Tray init error: {e}")
+            self._tray_icon = None
+
     def on_exit(self):
         self._running = False
         self._stats_thread_running = False
+        if self._tray_icon:
+            try:
+                self._tray_icon.stop()
+            except Exception:
+                pass
         if self._inst:
             self._inst.stop()
         self.root.destroy()
