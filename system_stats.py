@@ -50,11 +50,31 @@ class SystemStats:
         }
 
     def get_gpu(self):
-        """GPU 占用（nvidia-smi，缓存 3 秒）"""
+        """GPU 占用（nvidia-smi → PowerShell 计数器 → WMI）"""
         now = time.time()
         if self._gpu_cache and now - self._gpu_cache_time < 3:
             return self._gpu_cache
 
+        gpu = None
+
+        # 1) nvidia-smi (NVIDIA)
+        if not gpu:
+            gpu = self._gpu_nvidia_smi()
+
+        # 2) PowerShell 性能计数器 (Windows通用)
+        if not gpu:
+            gpu = self._gpu_ps_counter()
+
+        # 3) WMI 基本信息（无占用率）
+        if not gpu:
+            gpu = self._gpu_wmi_fallback()
+
+        self._gpu_cache = gpu
+        self._gpu_cache_time = now
+        return gpu
+
+    def _gpu_nvidia_smi(self):
+        """通过 nvidia-smi 获取 NVIDIA GPU 数据"""
         try:
             result = subprocess.run(
                 ["nvidia-smi", "--query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu,name",
@@ -74,13 +94,89 @@ class SystemStats:
                             "temp": float(parts[3]),
                             "name": parts[4] if len(parts) > 4 else "NVIDIA",
                         })
-                self._gpu_cache = gpus
-                self._gpu_cache_time = now
                 return gpus
         except (subprocess.TimeoutExpired, FileNotFoundError, ValueError):
             pass
+        return None
 
-        self._gpu_cache = None
+    def _gpu_ps_counter(self):
+        """通过 PowerShell 性能计数器获取 GPU 占用率（Windows 10/11 WDDM 2.x+，支持 AMD/Intel/NVIDIA）"""
+        try:
+            ps_cmd = """
+$counters = @(Get-Counter -Counter "\\GPU Engine(*)\\Utilization Percentage" -ErrorAction SilentlyContinue)
+$util = 0
+$hasData = $false
+if ($counters) {
+    foreach ($s in $counters[0].CounterSamples) {
+        $v = $s.CookedValue
+        if ($v -gt 0) { $hasData = $true }
+        $util += $v
+    }
+}
+if ($util -gt 0 -or $hasData) {
+    Write-Output ("UTIL:" + [math]::Round($util, 1))
+}
+# GPU 名称和显存
+$adapters = Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue
+foreach ($a in $adapters) {
+    if ($a.Name -and $a.Name -notmatch "Oray|Indirect|Basic|Microsoft") {
+        Write-Output ("NAME:" + $a.Name)
+        $ram = $a.AdapterRAM
+        if ($ram -and $ram -gt 0) {
+            Write-Output ("MEM:" + [math]::Round($ram/1GB, 1))
+        }
+    }
+}
+"""
+            result = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", ps_cmd],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                lines = result.stdout.strip().split("\n")
+                util = 0
+                name = "GPU"
+                mem_total = 0
+                for line in lines:
+                    line = line.strip()
+                    if line.startswith("UTIL:"):
+                        try:
+                            util = float(line.split(":", 1)[1])
+                        except ValueError:
+                            pass
+                    elif line.startswith("NAME:"):
+                        name = line.split(":", 1)[1][:50]
+                    elif line.startswith("MEM:"):
+                        try:
+                            mem_total = float(line.split(":", 1)[1])
+                        except ValueError:
+                            pass
+                return [{"util": util, "mem_used": 0,
+                         "mem_total": mem_total, "temp": 0, "name": name}]
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            pass
+        return None
+
+    def _gpu_wmi_fallback(self):
+        """WMI 获取 GPU 基本信息（无占用率）"""
+        try:
+            result = subprocess.run(
+                ["wmic", "path", "win32_videocontroller", "get", "name,adapterram,status",
+                 "/format:csv"],
+                capture_output=True, text=True, timeout=3
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                lines = result.stdout.strip().split("\n")
+                for line in lines:
+                    parts = line.split(",")
+                    for i, p in enumerate(parts):
+                        if p.strip() and "Name" not in p and "AdapterRAM" not in p:
+                            name = parts[1].strip() if len(parts) > 1 else "GPU"
+                            if name and name != "Name" and not name.startswith("\""):
+                                return [{"util": 0, "mem_used": 0, "mem_total": 0,
+                                         "temp": 0, "name": name}]
+        except Exception:
+            pass
         return None
 
     def get_disks(self):
