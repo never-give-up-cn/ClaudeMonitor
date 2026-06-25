@@ -595,6 +595,7 @@ def main():
     log_poll_counter = 0
     last_done_sound = 0  # 完成音防抖
     last_log_turns = 0   # 上次日志轮数
+    start_time = time.time()  # 启动时间（静默期）
 
     try:
         while True:
@@ -685,7 +686,7 @@ def main():
                     except Exception:
                         pass
 
-                if should_done and now_t - last_done_sound > 8:
+                if should_done and now_t - start_time > 15 and now_t - last_done_sound > 8:
                     last_done_sound = now_t
                     try:
                         play(SOUND_DONE)

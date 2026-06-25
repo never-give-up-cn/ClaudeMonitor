@@ -395,7 +395,8 @@ class ClaudeMonitorGUI:
 
         # 上次日志轮数（用于检测新完成的任务）
         self._last_log_turns = 0
-        self._last_done_sound = 0  # 上次播放完成音的秒数（防抖）
+        self._last_done_sound = 0   # 上次播放完成音的秒数（防抖）
+        self._start_time = time.time()  # 启动时间（用于启动静默期）
 
         # 窗口尺寸
         self.win_w, self.win_h = 480, 440
@@ -628,14 +629,15 @@ class ClaudeMonitorGUI:
             try:
                 summary = self.conversation_logger.get_summary()
                 turns = summary.get("turns", 0)
-                if turns > self._last_log_turns and self._last_log_turns > 0:
+                if turns > self._last_log_turns:
+                    if self._last_log_turns > 0:
+                        should_play_done = True
                     self._last_log_turns = turns
-                    should_play_done = True
             except Exception:
                 pass
 
-        # 统一播放完成音（防抖：同轮对话只响一次）
-        if should_play_done and now - self._last_done_sound > 8:
+        # 统一播放完成音（防抖 + 启动静默期）
+        if should_play_done and now - self._start_time > 15 and now - self._last_done_sound > 8:
             self._last_done_sound = now
             try:
                 play(SOUND_DONE)
